@@ -63,8 +63,8 @@ def rules_text() -> str:
         + "\n🥶 <b>Penalty</b>\nNo dice. You pick a corner, their captain calls the dive."
         "\nWrong corner → goal. Read corner → nerve duel:"
         f"\n<code>SHO + 0–{PENALTY_NERVE_SPAN} vs PWR + MET÷2 + 0–{PENALTY_NERVE_SPAN}</code>"
-        + "\n\n🛡 <b>Passives</b> are manual now — arm one from the button bar."
-        " Each passive carries <b>2 charges</b> per match; the condition must hold when it fires."
+        + "\n\n🛡 <b>Passives</b> arm themselves the moment their condition holds — no pressing needed."
+        " Each passive carries <b>2 charges</b> per match; tap one to swap which is active."
         + "\n⚡ <b>Skills</b> are one-shot — press the ⚡ button to arm one;"
         " 🎲 <b>Gamble</b> skills roll your die and let fate decide the payoff."
         + quote("Every character fields six abilities — two innate, four earned through levels and yen. Full details in /abilities.")
@@ -554,7 +554,7 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
         f"⚡ <b>EQUIPMENT</b>\n"
         f"{icon_of(char_key)}<b>{esc(name_of(char_key))}</b> · {overall(effective_stats(char_key, {}))} OVR\n"
         f"<i>{esc(role_of(char_key))}</i>\n{RULE}\n"
-        "<i>🛡 Passives fire manually — arm one from the button bar, it uses one of its 2 charges. "
+        "<i>🛡 Passives fire on their own — 2 charges each; they arm themselves when the condition holds. "
         "⚡ Skills are one-shot per match. 🎲 Gamble skills roll the die and let fate decide.</i>\n"
     )
     blocks = []

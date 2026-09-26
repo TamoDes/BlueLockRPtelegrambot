@@ -177,10 +177,11 @@ _KITS = [
             "「Tempo is a weapon.」",
             "Passive: +1 to all his duel powers whenever his team holds possession parity or better (not trailing).",
             att=lambda c: 1 if not _losing(c) else 0)),
-        _reg(Ability("sae_s2", "sae", "passive", 3, "Genius Arc",
+        _reg(Ability("sae_s2", "sae", "skill", 3, "Genius Arc",
             "「Talent like mine bends games around it.」",
-            "Passive: +2 Free Kick power, and his penalty nerve checks gain +2 — pure technique beats panic.",
-            att=lambda c: 2 if c["action"] == "freekick" else 0, pen_edge=2)),
+            "Once per match: his free kick is delivered with world-class precision — +3 on the kick while the keeper plays −2.",
+            att=lambda c: 3 if c["action"] == "freekick" else 0, gk_down=2,
+            when=lambda c: c["action"] == "freekick")),
     ]),
     ("kaiser", [
         _reg(Ability("kaiser_p1", "kaiser", "passive", 1, "Kaiser Impact",
@@ -396,10 +397,11 @@ _KITS = [
             "「Heroes don't lose twice.」",
             "+2 Shot while his team is trailing.",
             att=lambda c: 2 if c["action"] == "shoot" and _losing(c) else 0)),
-        _reg(Ability("kunigami_s2", "kunigami", "passive", 3, "Captain's Wall",
+        _reg(Ability("kunigami_s2", "kunigami", "skill", 3, "Captain's Wall",
             "「Nothing gets past us today.」",
-            "While he's on the pitch, his team's keeper effectively plays +1 stronger — a leader's presence organizes the whole box.",
-            aura_gk=1)),
+            "Once per match: with his team behind, his rocket tears through — +2 on the shot while the keeper reads it −2.",
+            att=lambda c: 2 if c["action"] == "shoot" else 0, gk_down=2,
+            when=lambda c: c["action"] == "shoot" and _losing(c))),
     ]),
     # ---------------------------------------------------------------- R
     ("aryu", [
@@ -534,7 +536,7 @@ _KITS = [
     ("wanima_a", [
         _reg(Ability("wanima_a_p1", "wanima_a", "passive", 1, "Twin Sync",
             "「He knows. I know. Nobody else does.」",
-            "+1 to all duel powers while his twin Jyngo is on the same team.",
+            "+1 to all duel powers while his twin Junichi is on the same team.",
             att=lambda c: 1 if _mate("wanima_j")(c) else 0)),
         _reg(Ability("wanima_a_s1", "wanima_a", "skill", 1, "Overlap Run",
             "「Call it — I'm already running.」",

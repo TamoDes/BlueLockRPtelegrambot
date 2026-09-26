@@ -84,8 +84,8 @@ def start(message):
         "🧤 /keeper — The goalkeeper's limits\n"
         "🏳️ /surrender — Your captain forfeits\n"
         + RULE
-        + "<i>\n🛡 Passives are manual now — arm them from the button bar, 2 charges each."
-        " ⚡ Skills fire once per match. 🎲 Gamble skills roll your die and let fate decide.</i>\n"
+        + "<i>\n🛡 Passives arm themselves — 2 charges each, no button needed."
+        " ⚡ Skills fire once per match — press ⚡ to arm one. 🎲 Gamble skills roll your die and let fate decide.</i>\n"
         + f"💰 <b>{yen(row['yen'])}</b> · Lv <b>{level}</b>"
         + ("" if own else "\n\n<i>No character yet — /gacha to pull one.</i>"),
     )

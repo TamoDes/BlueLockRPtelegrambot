@@ -240,6 +240,15 @@ def shift_lines(lines: dict, roster: list, holder_team: int) -> dict:
     return out
 
 
+def _drop_auto_armed(state: dict) -> None:
+    """An auto-armed passive that never fired goes back to the pool."""
+    tracked = state.pop("auto_armed", {})
+    armed = state.get("armed", {})
+    for slot, aid in tracked.items():
+        if armed.get(slot) == aid:
+            armed.pop(slot, None)
+
+
 def _gated(ab, ctx) -> bool:
     if ab.when is None:
         return True
@@ -301,6 +310,20 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
     ctx_att = abilities.build_ctx(match, roster, actor, defender, action, zone, state)
     notes: list[str] = []
     state["notes"] = notes
+
+    # --- passives arm themselves: pick an eligible one while the slot is free
+    auto_slot = str(actor["slot"])
+    if auto_slot not in state.get("armed", {}):
+        for _ab in att_kit:
+            if (
+                _ab.kind == "passive"
+                and _ab.id not in state.get("no_auto", [])
+                and abilities.usable(state, _ab)
+                and _gated(_ab, ctx_att)
+            ):
+                abilities.arm(state, actor["slot"], _ab)
+                state.setdefault("auto_armed", {})[str(actor["slot"])] = _ab.id
+                break
 
     duel = {
         "action": action,
@@ -393,6 +416,17 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
     def _defender_arms(row, power_key: str, boost_key: str, floor_key: str) -> None:
         """Apply the row's armed defensive ability to the current duel stage."""
         ctx_def = abilities.build_ctx(match, roster, row, actor, action, zone, state)
+        if str(row["slot"]) not in state.get("armed", {}):
+            for _ab in abilities.kit_of(kits, row):
+                if (
+                    _ab.kind == "passive"
+                    and _ab.id not in state.get("no_auto", [])
+                    and abilities.usable(state, _ab)
+                    and _gated(_ab, ctx_def)
+                ):
+                    abilities.arm(state, row["slot"], _ab)
+                    state.setdefault("auto_armed", {})[str(row["slot"])] = _ab.id
+                    break
         d_armed = abilities.peek_armed(state, row["slot"])
         if d_armed is None or not _gated(d_armed, ctx_def):
             return
@@ -429,7 +463,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             ab.aura_gk
             for r in roster if r["team"] == defender_team(actor)
             for ab in abilities.kit_of(kits, r)
-            if ab.aura_gk
+            if ab.kind == "passive" and ab.aura_gk
         )
         duel["gk_power"] += aura
 
@@ -468,6 +502,7 @@ def cancel_duel(match_id: int) -> None:
     state = pending_of(match)
     state.pop("duel", None)
     state.pop("notes", None)
+    _drop_auto_armed(state)
     db.update_match(match_id, phase="play", pending=json.dumps(state))
 
 
@@ -663,6 +698,8 @@ def arm_skill(match_id: int, user_id: int, ability_id: str) -> dict:
     me = next((r for r in roster if r["user_id"] == user_id), None)
     if me is None or me["char_key"] != ab.char:
         return {"status": "foreign"}
+    if ability_id not in abilities.owned_ids(user_id, ab.char):
+        return {"status": "locked", "name": ab.name}
     holder_slot = match["holder"]
     is_holder = holder_slot == me["slot"]
     with db.tx() as c:
@@ -679,13 +716,22 @@ def arm_skill(match_id: int, user_id: int, ability_id: str) -> dict:
             return {"status": "notturn", "name": ab.name}
         current = state.setdefault("armed", {})
         mine_key = str(me["slot"])
+        state.get("auto_armed", {}).pop(mine_key, None)
         if current.get(mine_key) == ability_id:
             current.pop(mine_key, None)
+            if ab.kind == "passive":
+                paused = state.setdefault("no_auto", [])
+                if ability_id not in paused:
+                    paused.append(ability_id)
             c.execute("UPDATE matches SET pending=? WHERE id=?", (json.dumps(state), match_id))
             return {"status": "disarmed", "name": ab.name}
         if mine_key in current:
             other = abilities.get(current[mine_key])
-            return {"status": "swap", "name": other.name if other else "?"}
+            if other is not None and other.kind == "passive":
+                # an auto-armed passive yields to whatever the player presses
+                current.pop(mine_key, None)
+            else:
+                return {"status": "swap", "name": other.name if other else "?"}
         if not is_holder and not is_defensive(ab):
             return {"status": "notturn", "name": ab.name}
         current[mine_key] = ability_id
@@ -1088,7 +1134,7 @@ def resolve(match_id: int) -> dict | None:
         autoscore = False
         if pen_ab is not None and (pen_ab.pen_edge or pen_ab.pen_autoscore):
             abilities.spend_armed(state, actor["slot"])
-            edge = pen_ab.pen_edge
+            edge = 0 if pen_ab.kind == "passive" else pen_ab.pen_edge
             autoscore = pen_ab.pen_autoscore
             if autoscore:
                 abilities.note(state, actor["name"], pen_ab, "keeper sent the wrong way")
@@ -1200,6 +1246,7 @@ def resolve(match_id: int) -> dict | None:
     flow_notes = credit_flow_wins(match, state, out, roster)
     out["notes"] = notes + state.pop("notes", []) + flow_notes
 
+    _drop_auto_armed(state)
     state.pop("duel", None)
     turn = match["turn"] + 1
     db.update_match(match_id, turn=turn, holder=new_holder, phase="play", pending=json.dumps(state))

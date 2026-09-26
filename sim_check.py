@@ -50,7 +50,7 @@ assert db.set_display(102, "Alpha") is False
 db.bump_boost(101, "shot", 9)
 own = db.owned_by(101)
 eff = characters.effective_stats(own["char_key"], json.loads(own["boosts"]))
-assert eff["shot"] == min(config.MAX_STAT, characters.base_stats("isagi")["shot"] + config.MAX_BOOST)
+assert eff["shot"] == min(config.MAX_STAT, characters.base_stats(own["char_key"])["shot"] + config.MAX_BOOST)
 assert all(1 <= v <= config.MAX_STAT for v in eff.values())
 assert 1 <= KEEPER_POWER <= config.MAX_STAT
 assert 1 < KEEPER_CATCH_ROLL <= DICE_FACES
@@ -641,27 +641,36 @@ def arm_stage(m: int, slot: int, aid: str, **kw) -> None:
     do_arm(m, slot, aid)
 
 
-stage(mid, rs, zone=0)
-opened = engine.open_duel(mid, "dribble", None)
-assert opened["duel"]["att_power"] == base_dri, opened["duel"]["att_power"]
-engine.cancel_duel(mid)
+def restage(m: int, slot: int, **kw) -> None:
+    prev = engine.pending_of(db.match(m))
+    stage(m, slot, **kw)
+    st = engine.pending_of(db.match(m))
+    st["charges"] = prev.get("charges", {})
+    st["used"] = prev.get("used", [])
+    db.update_match(m, pending=json.dumps(st))
 
-arm_stage(mid, rs, "rin_p1", zone=0)
+
+restage(mid, rs, zone=0)
 opened = engine.open_duel(mid, "dribble", None)
-assert opened["duel"]["att_power"] == base_dri + 2, opened["duel"]["att_power"]
+assert opened["duel"]["att_power"] == base_dri + 2, ("passive must arm itself", opened["duel"]["att_power"])
 assert opened["duel"]["att_boosts"] == [("Cold Predator", 2)], opened["duel"]["att_boosts"]
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
-assert st["charges"]["rin_p1"] == 1, "passive used one of two charges"
+assert st["charges"]["rin_p1"] == 1, "auto-fired passive used one of two charges"
 
-arm_stage(mid, rs, "rin_p1", zone=0)
+restage(mid, rs, zone=0)
 opened = engine.open_duel(mid, "dribble", None)
-assert opened["duel"]["att_power"] == base_dri + 2
+assert opened["duel"]["att_power"] == base_dri + 2, "second charge fires on its own too"
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
 assert "rin_p1" in st["used"], "second use exhausts the passive"
+
+restage(mid, rs, zone=0)
+opened = engine.open_duel(mid, "dribble", None)
+assert ("Cold Predator", 2) not in opened["duel"]["att_boosts"], "spent passive must not fire again"
+engine.cancel_duel(mid)
 assert engine.arm_skill(mid, rin_u, "rin_p1")["status"] == "spent"
-print("ok  manual passives: 2 charges, boosts tagged on the calc line")
+print("ok  passives fire on their own: 2 charges, boosts tagged on the calc line")
 
 # S2: passive condition checked at resolution, not blindly.
 # last_pass holds the PASSER's slot, so stage a real received pass from the teammate.
@@ -822,9 +831,9 @@ engine.open_duel(mid10, "dribble", None)
 assert engine.submit_die(mid10, clean_att, 6)["status"] == "ok"
 assert engine.record_die(mid10, "def", 1) is True
 duel = engine.pending_of(db.match(mid10))["duel"]
-assert duel["def_floor"] == 0, "un-armed floor must stay idle"
+assert duel["def_floor"] == 2, "passive die floor must arm itself"
 engine.cancel_duel(mid10)
-print("ok  die floor only while armed")
+print("ok  die floor arms itself on both sides")
 
 # S11: economy gating — tiers, prices, innate starters, idempotent grants
 cost2, lv2 = abilities.price_and_level(abilities.get("rin_p2"))
@@ -852,7 +861,7 @@ us = slot_of(midU, isagi_u)
 stage(midU, us, zone=ZONE_SHOOT)
 do_arm(midU, us, "isagi_s3")
 engine.open_duel(midU, "shoot", None)
-out = roll_and_resolve(midU, att=6, dfn=1, gk=6)
+out = roll_and_resolve(midU, att=4, dfn=1, gk=6)
 assert out["outcome"] == "goal" and out.get("margin_goal") == 2
 assert "isagi_s3" in engine.pending_of(db.match(midU))["used"]
 print("ok  isagi ultimate margin goal (armed)")
@@ -927,6 +936,31 @@ out = roll_and_resolve(midY, att=1, dfn=6)
 assert out["outcome"] in ("tackled", "blocked") and not out.get("first_free"), "no second devour"
 assert db.match(midY)["holder"] == dslotY, "second loss is a real turnover"
 print("ok  devour the stage: only the first loss is free")
+
+# S12b: canon newcomers — kits of six render, and one duel proves they play
+new_users = {}
+for nk in ("aiku", "charles", "ness", "zantetsu"):
+    assert characters.resolve(characters.name_of(nk)) == nk, nk
+    assert len(abilities.kit_for_char(nk)) == 6, nk
+    n_u = make_user(nk)
+    new_users[nk] = n_u
+    n_txt, _ = views.kit_page(n_u, nk)
+    assert abilities.kit_for_char(nk)[0].name in n_txt, nk
+print("ok  newcomers: Aiku/Charles/Ness/Zantetsu kits of six render")
+
+z_u = new_users["zantetsu"]
+a_u = new_users["aiku"]
+mZ = build_match([(z_u, a_u)])
+zs = slot_of(mZ, z_u)
+stage(mZ, zs, zone=1)
+do_arm(mZ, zs, "zantetsu_s1")
+opened = engine.open_duel(mZ, "dribble", None)
+assert opened["duel"].get("auto", {}).get("t") == "win", "Steel Dash must win outright"
+assert any(nm == "Board Vision" for nm, _ in opened["duel"]["def_boosts"]), opened["duel"]["def_boosts"]
+out = roll_and_resolve(mZ, att=1, dfn=6)
+assert out["outcome"] == "dribble_ok"
+assert engine.pending_of(db.match(mZ))["zone"] > 1, "a dribble win advances the zone"
+print("ok  newcomers duel: Steel Dash auto-wins + zone, Board Vision defends")
 
 # S13: full simulated ranked match WITH abilities stays coherent
 sim_u3 = make_user("bachira")

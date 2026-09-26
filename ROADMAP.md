@@ -2,6 +2,8 @@
 
 Date: 2026-09-01 · Based on a full code read-through (~7,600 lines, 19 files)
 Updated: 2026-09-23 — status pass (no design changes, just reality sync).
+Updated: 2026-09-25 — passives now arm themselves (skills stay manual), canon stat rebalance,
+4 newcomers (Aiku, Charles, Ness, Zantetsu), starter-kit bug fixed for extra-registered characters.
 
 **Status: Phases 0–3 SHIPPED (2026-09-07 → 2026-09-08).**
 Next up: Phase 7 goal cinema → 5 ELO+leagues → 6 H2H/cups/bets → 4 momentum/tactics → 9 /shootout → 8 economy → 10 season rollover.
@@ -13,7 +15,7 @@ Next up: Phase 7 goal cinema → 5 ELO+leagues → 6 H2H/cups/bets → 4 momentu
 | File | Role | State |
 |---|---|---|
 | `bluelock/engine.py` (1,008) | Heart of the game: duels, set pieces, penalties, gambles | Clean, simple state machine |
-| `bluelock/abilities.py` + `abilities_extra.py` | 28 characters × 6 abilities = 168 | Dataclass registry, clean |
+| `bluelock/abilities.py` + `abilities_extra.py` | 32 characters × 6 abilities = 192 | Dataclass registry, clean |
 | `bluelock/db.py` (620) | SQLite + WAL, atomic transactions | Solid |
 | `bluelock/views.py` (648) | All renders, keyboards | Phone-first design system works |
 | `bluelock/handlers_match.py` | Match flow, real dice, relay | Core UX |
