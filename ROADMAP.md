@@ -4,6 +4,8 @@ Date: 2026-09-01 · Based on a full code read-through (~7,600 lines, 19 files)
 Updated: 2026-09-23 — status pass (no design changes, just reality sync).
 Updated: 2026-09-25 — passives now arm themselves (skills stay manual), canon stat rebalance,
 4 newcomers (Aiku, Charles, Ness, Zantetsu), starter-kit bug fixed for extra-registered characters.
+Also 2026-09-25 — Phase 7 goal cinema shipped; Shop v2 (sectioned screen, ≤2-col training grid,
+reroll confirm screen, equipped-title marks) + one canonical screen header via `fmt.header`/`fmt.hint`.
 
 **Status: Phases 0–3 SHIPPED (2026-09-07 → 2026-09-08).**
 Next up: Phase 7 goal cinema → 5 ELO+leagues → 6 H2H/cups/bets → 4 momentum/tactics → 9 /shootout → 8 economy → 10 season rollover.

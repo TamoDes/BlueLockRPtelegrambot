@@ -35,10 +35,10 @@ from .core import (
     safe,
     seen,
 )
-from .fmt import RULE, clip, esc
+from .fmt import RULE, clip, esc, header
 
-HDR_MATCH = "⚔️ <b>NEW MATCH</b>\n" + RULE
-HDR_MATCHES = "📋 <b>ACTIVE MATCHES</b>\n" + RULE
+HDR_MATCH = header("⚔️", "NEW MATCH")
+HDR_MATCHES = header("📋", "ACTIVE MATCHES")
 
 
 def new_match_keyboard() -> types.InlineKeyboardMarkup:

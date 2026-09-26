@@ -31,7 +31,7 @@ from .config import (
     train_cost,
 )
 from .core import NO_CHAR, bot, safe, seen
-from .fmt import RULE, bar, esc, mono, yen
+from .fmt import RULE, bar, esc, header, mono, yen
 
 NAME_OK = re.compile(r"^[a-zA-Z0-9_ ]{2,20}$")
 
@@ -48,13 +48,8 @@ def deliver_card(chat_id: int, text: str, char_key: str | None, reply_to_id: int
 def limit_rows(stats: dict[str, int]) -> list[str]:
     return [f"{STAT_ABBR[s]}  {stats[s]:>2}  {bar(stats[s], MAX_STAT, 8)}" for s in STATS]
 
-HDR_START = (
-    "⚽ <b>BLUE LOCK</b>\n"
-    "<i>Every roll is a chance. Every match is a war.</i>\n"
-    + RULE
-)
-HDR_SHOP = "🛒 <b>SHOP</b>"
-HDR_CHARS = "📋 <b>CHARACTERS</b>\n<i>SHO·PAS·DRI·MET·FRK</i>"
+HDR_START = header("⚽", "BLUE LOCK", "Every roll is a chance. Every match is a war.")
+HDR_CHARS = header("📋", "CHARACTERS", "SHO·PAS·DRI·MET·FRK")
 
 
 @bot.message_handler(commands=["start", "help"])
@@ -282,8 +277,8 @@ def balance(message):
 
 # ------------------------------------------------------------------ daily & quests
 
-HDR_DAILY = "📅 <b>DAILY</b>"
-HDR_QUESTS = "🎯 <b>DAILY QUESTS</b>"
+HDR_DAILY = header("📅", "DAILY")
+HDR_QUESTS = header("🎯", "DAILY QUESTS")
 
 
 @bot.message_handler(commands=["daily"])
@@ -299,7 +294,7 @@ def daily_cmd(message):
         safe(
             bot.reply_to,
             message,
-            f"{HDR_DAILY}\n{RULE}\n"
+            f"{HDR_DAILY}\n"
             f"✅ Already claimed today — streak <b>{streak}/{economy.DAILY_MAX_STREAK}</b> 🔥\n"
             f"⏳ Come back tomorrow: <b>{yen(next_amt)}</b>\n{RULE}\n"
             + economy.quests_summary(user_id, day),
@@ -308,7 +303,7 @@ def daily_cmd(message):
     safe(
         bot.reply_to,
         message,
-        f"{HDR_DAILY}\n{RULE}\n"
+        f"{HDR_DAILY}\n"
         f"🔥 Streak <b>{streak}/{economy.DAILY_MAX_STREAK}</b>\n"
         f"💰 Claimed <b>{yen(amount)}</b>\n{RULE}\n"
         "<i>Keep coming back — the streak grows to "
@@ -349,7 +344,7 @@ def qclaim_cb(call):
         row = db.player(call.from_user.id)
         safe(
             bot.edit_message_text,
-            f"{HDR_QUESTS}\n{RULE}\n" + economy.quests_summary(call.from_user.id, day) + f"\n💰 Balance: <b>{yen(row['yen'])}</b>",
+            f"{HDR_QUESTS}\n" + economy.quests_summary(call.from_user.id, day) + f"\n💰 Balance: <b>{yen(row['yen'])}</b>",
             call.message.chat.id,
             call.message.message_id,
         )
@@ -363,7 +358,7 @@ def qrefresh_cb(call):
     if call.message:
         safe(
             bot.edit_message_text,
-            f"{HDR_QUESTS}\n{RULE}\n" + economy.quests_summary(call.from_user.id, day),
+            f"{HDR_QUESTS}\n" + economy.quests_summary(call.from_user.id, day),
             call.message.chat.id,
             call.message.message_id,
             reply_markup=quests_keyboard(call.from_user.id, day),
@@ -377,7 +372,7 @@ def quests_cmd(message):
     safe(
         bot.reply_to,
         message,
-        f"{HDR_QUESTS}\n{RULE}\n" + economy.quests_summary(message.from_user.id, day)
+        f"{HDR_QUESTS}\n" + economy.quests_summary(message.from_user.id, day)
         + f"\n🎁 Each finished quest pays <b>{yen(economy.QUEST_REWARD)}</b>.",
         reply_markup=quests_keyboard(message.from_user.id, day),
     )
@@ -481,72 +476,35 @@ def kitrefresh_cb(call):
 
 # ------------------------------------------------------------------ shop
 
-def next_boost_level(spent: int) -> int:
-    return BOOST_LEVELS[min(spent, len(BOOST_LEVELS) - 1)]
+# shop UI lives in views.py (shop_page / titles_page / rollconfirm_page)
 
 
-TITLE_PRESETS = ("The Monster", "Ace Striker", "Blue Lock MVP", "Chosen One", "Devourer")
+def shop_body(user_id: int) -> str:
+    return views.shop_page(user_id)[0]
 
 
 def shop_markup(user_id: int) -> types.InlineKeyboardMarkup:
-    own = db.owned_by(user_id)
-    row = db.player(user_id)
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    if own:
-        boosts = json.loads(own["boosts"])
-        spent = sum(min(MAX_BOOST, boosts.get(s, 0)) for s in STATS)
-        allowed = boosts_allowed(level_for(row["xp"]))
-        if spent >= len(BOOST_LEVELS):
-            kb.add(types.InlineKeyboardButton("💪 All training slots used ✅", callback_data="noop"))
-        else:
-            for s in STATS:
-                level = min(MAX_BOOST, boosts.get(s, 0))
-                if level >= MAX_BOOST:
-                    kb.add(types.InlineKeyboardButton(f"{STAT_NAME[s]} — MAX ✅", callback_data="noop"))
-                elif spent >= allowed:
-                    kb.add(types.InlineKeyboardButton(
-                        f"🔒 {STAT_NAME[s]} — needs Lv {next_boost_level(spent)}", callback_data="noop"
-                    ))
-                else:
-                    kb.add(types.InlineKeyboardButton(
-                        f"💪 Train {STAT_NAME[s]} (+1) — {train_cost(level):,}¥",
-                        callback_data=f"train|{s}",
-                    ))
-        if abilities.enabled():
-            locked = [
-                ab for ab in abilities.kit_for_char(own["char_key"])
-                if ab.tier > 1 and ab.id not in db.unlocked_ids(user_id)
-            ]
-            label = f"⚡ Abilities — {len(locked)} unlock(s) available" if locked else "⚡ Abilities — view kit"
-            kb.add(types.InlineKeyboardButton(label, callback_data="openkit"))
-    kb.add(types.InlineKeyboardButton(f"🎰 Reroll character — {REROLL_COST:,}¥", callback_data="buyroll"))
-    kb.add(types.InlineKeyboardButton(f"🏷 Pick a title — {TITLE_COST:,}¥", callback_data="titles"))
-    return kb
+    return views.shop_page(user_id)[1]
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "rollinfo")
+def rollinfo_cb(call):
+    seen(call)
+    safe(bot.answer_callback_query, call.id)
+    if call.message:
+        text, kb = views.rollconfirm_page(call.from_user.id)
+        safe(bot.edit_message_text, text, call.message.chat.id,
+             call.message.message_id, reply_markup=kb)
 
 
 @bot.callback_query_handler(func=lambda c: c.data == "titles")
 def titles_cb(call):
     seen(call)
     safe(bot.answer_callback_query, call.id)
-    if not call.message:
-        return
-    row = db.player(call.from_user.id)
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    for t in TITLE_PRESETS:
-        kb.add(types.InlineKeyboardButton(
-            f"🏷 {t}", callback_data=f"settitle|{t}"
-        ))
-    kb.add(types.InlineKeyboardButton(
-        "✏️ Custom: /title YourTitle", callback_data="noop"
-    ))
-    kb.add(types.InlineKeyboardButton("↩︎ Back", callback_data="shopback"))
-    safe(
-        bot.edit_message_text,
-        f"{HDR_SHOP}\n💰 <b>{yen(row['yen'])}</b>\n{RULE}\nPick a title — cost <b>{yen(TITLE_COST)}</b>:",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=kb,
-    )
+    if call.message:
+        text, kb = views.titles_page(call.from_user.id)
+        safe(bot.edit_message_text, text, call.message.chat.id,
+             call.message.message_id, reply_markup=kb)
 
 
 @bot.callback_query_handler(func=lambda c: c.data == "shopback")
@@ -563,29 +521,6 @@ def shopback_cb(call):
         )
 
 
-def shop_body(user_id: int) -> str:
-    row = db.player(user_id)
-    own = db.owned_by(user_id)
-    body = f"{HDR_SHOP}\n💰 <b>{yen(row['yen'])}</b>\n"
-    if own:
-        boosts = json.loads(own["boosts"])
-        spent = sum(min(MAX_BOOST, boosts.get(s, 0)) for s in STATS)
-        allowed = boosts_allowed(level_for(row["xp"]))
-        eff = effective_stats(own["char_key"], boosts)
-        level = level_for(row["xp"])
-        body += (
-            f"{RULE}\n"
-            f"{icon_of(own['char_key'])}<b>{esc(name_of(own['char_key']))}</b> · <b>{overall(eff)} OVR</b>\n"
-            f"💪 Slots <b>{spent}/{allowed}</b>"
-        )
-        if spent >= allowed:
-            nxt = next((lv for lv in BOOST_LEVELS if lv > level), None)
-            if nxt:
-                body += f" — 🔒 next slot at Lv {nxt}"
-        body += "\n<i>Each +1 costs a slot & yen.\nAbilities live in /abilities.</i>"
-    else:
-        body += f"{RULE}\n{NO_CHAR}"
-    return body
 
 
 @bot.message_handler(commands=["celebration"])
@@ -665,7 +600,7 @@ def train_cb(call):
         safe(
             bot.answer_callback_query,
             call.id,
-            f"🔒 Next upgrade slot unlocks at level {next_boost_level(spent)}.",
+            f"🔒 Next upgrade slot unlocks at level {views.next_boost_level(spent)}.",
             show_alert=True,
         )
         return
@@ -758,13 +693,9 @@ def settitle_cb(call):
         return
     db.set_title(call.from_user.id, text)
     safe(bot.answer_callback_query, call.id, f"🏷 {text}")
-    safe(
-        bot.edit_message_text,
-        shop_body(call.from_user.id),
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=shop_markup(call.from_user.id),
-    )
+    t_text, t_kb = views.titles_page(call.from_user.id)
+    safe(bot.edit_message_text, t_text, call.message.chat.id,
+         call.message.message_id, reply_markup=t_kb)
 
 
 @bot.callback_query_handler(func=lambda c: c.data == "noop")

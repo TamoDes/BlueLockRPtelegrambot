@@ -24,7 +24,7 @@ import bluelock.db as db
 db.DB_PATH = TEST_DB
 db._conn = None
 
-from bluelock import abilities, characters, engine, payouts, views
+from bluelock import abilities, characters, engine, fmt, payouts, views
 from bluelock.config import (
     DICE_FACES,
     GOAL_TARGET,
@@ -1119,6 +1119,39 @@ assert db.player(fresh)["celebration"] == "🎉 SIUUU"
 db.set_celebration(fresh, "")
 assert db.player(fresh)["celebration"] in ("", None)
 print("ok  celebration: stored and cleared on the player row")
+
+# --- Presentation system + Shop v2 (fmt.header, views.shop_page & co) --------
+_h = fmt.header("\U0001f6d2", "SHOP", "Train. Collect. Devour.")
+assert _h == "\U0001f6d2 <b>SHOP</b>\n<i>Train. Collect. Devour.</i>\n" + fmt.RULE, _h
+assert fmt.hint("tip") == "<i>tip</i>"
+print("ok  presentation: header/hint build one canonical screen shape")
+
+config.ABILITIES_ENABLED = True
+with db.tx() as _c:  # level the fixture up so training slots are actually unlocked
+    _c.execute("UPDATE players SET xp=? WHERE user_id=?", (config.xp_for_level(12), fresh))
+st, sk = views.shop_page(fresh)
+for _m in ("\U0001f6d2 <b>SHOP</b>", fmt.RULE, "TRAINING", "STORE", "\U0001f4b0"):
+    assert _m in st, (_m, st)
+assert all(len(r) <= 2 for r in sk.keyboard), "shop grid must stay <=2 columns"
+_cbs = [b.callback_data for row in sk.keyboard for b in row]
+assert "rollinfo" in _cbs and "titles" in _cbs and "openkit" in _cbs, _cbs
+assert any(str(c).startswith("train|") for c in _cbs), _cbs
+print("ok  shop page: sections render, grid <=2 cols, store buttons wired")
+
+rct, rckb = views.rollconfirm_page(fresh)
+assert f"{config.REROLL_COST:,}" in rct, rct
+_rcbs = [b.callback_data for row in rckb.keyboard for b in row]
+assert "buyroll" in _rcbs and "shopback" in _rcbs, _rcbs
+print("ok  reroll confirm: cost shown, confirm + back wired")
+
+db.set_title(fresh, "Devourer")
+tt, tkb = views.titles_page(fresh)
+assert "Devourer" in tt and "\u2705" in tt, tt
+_tcbs = [b.callback_data for row in tkb.keyboard for b in row]
+assert any(str(c).startswith("settitle|") for c in _tcbs), _tcbs
+assert "shopback" in _tcbs, _tcbs
+db.set_title(fresh, None)
+print("ok  titles page: equipped title marked, presets wired, back works")
 
 config.ABILITIES_ENABLED = False
 

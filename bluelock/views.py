@@ -3,21 +3,27 @@ import json
 from telebot import types
 
 from . import abilities, db, economy, engine
-from .characters import effective_stats, epithet_of, icon_of, name_of, overall, role_of
+from .characters import ROSTER, effective_stats, epithet_of, icon_of, name_of, overall, role_of
 from .config import (
+    BOOST_LEVELS,
     GOAL_TARGET,
     KEEPER_CATCH_ROLL,
     KEEPER_NAME,
     KEEPER_POWER,
     LOG_KEEP,
+    MAX_BOOST,
     MAX_STAT,
     MODES,
     PENALTY_NERVE_SPAN,
+    REROLL_COST,
     STATS,
+    TITLE_COST,
     STAT_ABBR,
     ZONE_NAME,
+    boosts_allowed,
     level_for,
     rank_for,
+    train_cost,
     xp_for_level,
 )
 from .fmt import (
@@ -27,9 +33,12 @@ from .fmt import (
     bar,
     clip,
     esc,
+    header,
+    hint,
     mono,
     place,
     quote,
+    yen,
     yen_short,
 )
 
@@ -727,3 +736,117 @@ def card_text(row) -> str:
         f"{kv_line([('⚽', career['goals']), ('🅰', career['assists']), ('🧱', career['stops']), ('📊', career['played'])])}\n"
         f"{ricon} {esc(rname)} · Lv <b>{level}</b>"
     )
+
+
+# ------------------------------------------------------------------ shop (v2)
+TITLE_PRESETS = ("The Monster", "Ace Striker", "Blue Lock MVP", "Chosen One", "Devourer")
+
+
+def next_boost_level(spent: int) -> int:
+    return BOOST_LEVELS[min(spent, len(BOOST_LEVELS) - 1)]
+
+
+def shop_page(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
+    """The whole /shop screen — wallet, character, training grid, store."""
+    row = db.player(user_id)
+    own = db.owned_by(user_id)
+    lines = [
+        header("🛒", "SHOP", "Train. Collect. Devour."),
+        f"💰 Wallet — <b>{yen(row['yen'])}</b>",
+    ]
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    if own:
+        boosts = json.loads(own["boosts"])
+        spent = sum(min(MAX_BOOST, boosts.get(s, 0)) for s in STATS)
+        allowed = boosts_allowed(level_for(row["xp"]))
+        eff = effective_stats(own["char_key"], boosts)
+        lines.append(
+            f"{icon_of(own['char_key'])}<b>{esc(name_of(own['char_key']))}</b> · <b>{overall(eff)} OVR</b>"
+        )
+        lines.append(f"💪 Slots <b>{spent}/{allowed}</b> {bar(spent, allowed, 6)}")
+        lines += ["", "<b>💪 TRAINING</b>"]
+        if spent >= len(BOOST_LEVELS):
+            lines.append(hint("All training slots used — level up for more."))
+            kb.row(types.InlineKeyboardButton("💪 All slots used ✅", callback_data="noop"))
+        else:
+            lines.append(hint("Each +1 spends a slot and yen."))
+            btns = []
+            for s in STATS:
+                lvl = min(MAX_BOOST, boosts.get(s, 0))
+                if lvl >= MAX_BOOST:
+                    btns.append(types.InlineKeyboardButton(
+                        f"✅ {STAT_ABBR[s]} MAX", callback_data="noop"))
+                elif spent >= allowed:
+                    btns.append(types.InlineKeyboardButton(
+                        f"🔒 {STAT_ABBR[s]} · Lv{next_boost_level(spent)}", callback_data="noop"))
+                else:
+                    btns.append(types.InlineKeyboardButton(
+                        f"💪 {STAT_ABBR[s]} +1 · {yen(train_cost(lvl))}", callback_data=f"train|{s}"))
+            for i in range(0, len(btns), 2):
+                kb.row(*btns[i:i + 2])
+        if abilities.enabled():
+            locked = [
+                ab for ab in abilities.kit_for_char(own["char_key"])
+                if ab.tier > 1 and ab.id not in db.unlocked_ids(user_id)
+            ]
+            label = (f"⚡ Abilities — {len(locked)} unlock(s) available"
+                     if locked else "⚡ Abilities — view kit")
+            kb.row(types.InlineKeyboardButton(label, callback_data="openkit"))
+    lines += ["", "<b>🎰 STORE</b>",
+              hint("Reroll your fate or pick a title.")]
+    kb.row(types.InlineKeyboardButton(
+        f"🎰 Reroll character — {yen(REROLL_COST)}", callback_data="rollinfo"))
+    kb.row(types.InlineKeyboardButton(
+        f"🏷 Titles — {yen(TITLE_COST)}", callback_data="titles"))
+    return "\n".join(lines), kb
+
+
+def rollconfirm_page(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
+    """Confirm screen before spending on a reroll — cost, pool, what's lost."""
+    row = db.player(user_id)
+    own = db.owned_by(user_id)
+    cost = REROLL_COST if own else 0
+    taken = set(db.taken_keys())
+    if own:
+        taken.discard(own["char_key"])
+    pool = sum(1 for k in ROSTER if k not in taken)
+    lines = [
+        header("🎰", "REROLL CHARACTER", "One roll. One fate."),
+        f"💰 Wallet — <b>{yen(row['yen'])}</b>",
+    ]
+    if own:
+        lines.append(f"♻ Releases <b>{esc(name_of(own['char_key']))}</b>")
+    lines += [
+        f"🎴 Pool — <b>{pool}</b> characters available",
+        (f"Cost — <b>{yen(cost)}</b>" if cost
+         else "Cost — <b>FREE 🎁</b> <i>(first pull)</i>"),
+        hint("The roll is random — the released character is gone for good."),
+    ]
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    btn = f"✅ Confirm — {yen(cost)}" if cost else "✅ Pull — FREE 🎁"
+    kb.row(types.InlineKeyboardButton(btn, callback_data="buyroll"))
+    kb.row(types.InlineKeyboardButton("↩️ Back", callback_data="shopback"))
+    return "\n".join(lines), kb
+
+
+def titles_page(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
+    """Title shop — equipped title marked, presets, custom hint."""
+    row = db.player(user_id)
+    current = row["title"] if "title" in row.keys() else None
+    lines = [
+        header("🏷", "TITLES", "Shown under your name everywhere."),
+        f"💰 Wallet — <b>{yen(row['yen'])}</b>",
+        (f"Current — <b>{esc(current)}</b> ✅" if current
+         else "Current — <i>none yet</i>"),
+        f"Cost — <b>{yen(TITLE_COST)}</b> per title",
+        hint("Custom title: /title YourTitle"),
+    ]
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for title in TITLE_PRESETS:
+        if title == current:
+            kb.row(types.InlineKeyboardButton(f"✅ {title}", callback_data="noop"))
+        else:
+            kb.row(types.InlineKeyboardButton(
+                f"🏷 {title}", callback_data=f"settitle|{title}"))
+    kb.row(types.InlineKeyboardButton("↩️ Back", callback_data="shopback"))
+    return "\n".join(lines), kb

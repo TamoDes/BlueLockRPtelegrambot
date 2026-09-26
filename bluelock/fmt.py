@@ -1,6 +1,22 @@
 import html
 import re
 
+
+def header(emoji: str, title: str, sub: str | None = None) -> str:
+    """Canonical screen header: emoji + TITLE (+ italic sub) + rule.
+
+    Every screen starts with this so the bot reads as one product.
+    """
+    head = f"{emoji} <b>{title}</b>"
+    if sub:
+        head += f"\n<i>{sub}</i>"
+    return head + "\n" + RULE
+
+
+def hint(text: str) -> str:
+    return f"<i>{text}</i>"
+
+
 RULE = "──────────────"
 HEAVY = "━━━━━━━━━━━━"
 
