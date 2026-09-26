@@ -1305,6 +1305,76 @@ def gk_line(out: dict) -> str:
     )
 
 
+
+# ------------------------------------------------------- Phase 7: commentary pools
+# Base lines per outcome — describe() picks one at random so matches never read
+# the same twice. Only the plain branches are swapped; skill/walk/gamble specials
+# and every follow-up line (assist, nerve, wall, gk) stay deterministic.
+COMMENTARY: dict[str, tuple[str, ...]] = {
+    "goal": (
+        f"⚽️ <b>GOAL — {{actor}}</b> beats {KEEPER_NAME}!",
+        f"⚽️ <b>GOAL!</b> <b>{{actor}}</b> buries it — {KEEPER_NAME} never moved!",
+        f"⚽️ <b>GOAL — {{actor}}</b> with ice in his veins! {KEEPER_NAME} beaten!",
+        f"⚽️ <b>GOAL!</b> <b>{{actor}}</b> unleashes — and the net bulges past {KEEPER_NAME}!",
+    ),
+    "pass_ok": (
+        "🎯 <b>{actor}</b> ➜ <b>{target}</b> — a sharp pass into the channel",
+        "🎯 <b>{actor}</b> ➜ <b>{target}</b> — threaded through the line",
+        "🎯 <b>{actor}</b> ➜ <b>{target}</b> — the delivery finds its mark",
+    ),
+    "dribble_ok": (
+        "🌀 <b>{actor}</b> dribbles past <b>{defender}</b> — he's out of the play.",
+        "🌀 <b>{defender}</b> buys the feint — <b>{actor}</b> is gone.",
+        "🌀 <b>{actor}</b> twists away from <b>{defender}</b> — nothing but his back.",
+    ),
+    "tackled": (
+        "🦵 <b>{defender}</b> takes the ball off <b>{actor}</b>.",
+        "🦵 <b>{defender}</b> times it perfectly — <b>{actor}</b> loses it.",
+        "🦵 clean challenge — <b>{defender}</b> rips it off <b>{actor}</b>.",
+    ),
+    "intercepted": (
+        "🚫 <b>{defender}</b> reads <b>{actor}</b>'s delivery.",
+        "🚫 <b>{defender}</b> cuts it out — <b>{actor}</b>'s ball never arrives.",
+        "🚫 <b>{defender}</b> sees it coming and steps in front of <b>{actor}</b>.",
+    ),
+    "saved": (
+        f"🧤 <b>{KEEPER_NAME}</b> denies <b>{{actor}}</b> —",
+        f"🧤 <b>{KEEPER_NAME}</b> shuts the door on <b>{{actor}}</b> —",
+        f"🧤 huge hands — <b>{KEEPER_NAME}</b> answers <b>{{actor}}</b> —",
+    ),
+    "blocked": (
+        "🧱 <b>{defender}</b> blocks <b>{actor}</b>'s effort.",
+        "🧱 <b>{defender}</b> throws himself in — <b>{actor}</b>'s path is closed.",
+        "🧱 brave defending — <b>{defender}</b> shuts <b>{actor}</b> down.",
+    ),
+    "wall": (
+        f"🧱 <b>{{actor}}</b>'s effort is swarmed — the wall holds.",
+        f"🧱 the wall stands tall — <b>{{actor}}</b>'s shot crashes off it.",
+        f"🧱 bodies everywhere — <b>{{actor}}</b> can't punch through.",
+    ),
+}
+
+
+def commentary(key: str, **kw) -> str:
+    """Pick one random base line from a COMMENTARY pool and render it."""
+    return random.choice(COMMENTARY[key]).format(**kw)
+
+
+def big_moment_lines(out: dict, goals: int) -> list[str]:
+    """Extra hype lines for a goal — hat-trick, FLOW-powered, gamble payoff.
+
+    Quiet goals return nothing: every added line must earn its place.
+    """
+    notes: list[str] = []
+    if goals >= 3:
+        notes.append("🎩 <b>HAT-TRICK!</b> He's taken the match and devoured it whole.")
+    if any(str(n).startswith("🔥") for n, _ in (out.get("att_boosts") or [])):
+        notes.append("🔥 <b>FLOW STATE</b> — the finish came from a place beyond stats.")
+    if out.get("gamble_beaten"):
+        notes.append(f"🎲 <b>RISK PAID OFF</b> — {out['gamble_beaten']} beaten on the roll of a die.")
+    return notes
+
+
 def describe(out: dict, by_slot: dict | None = None) -> str:
     actor = out["actor"]["name"]
     outcome = out["outcome"]
@@ -1317,7 +1387,7 @@ def describe(out: dict, by_slot: dict | None = None) -> str:
         if out.get("walked"):
             line = f"🎯 <b>{actor}</b> ➜ <b>{out['target']['name']}</b> — a casual ball into open space. <i>No duel needed.</i>"
         else:
-            line = f"🎯 <b>{actor}</b> ➜ <b>{out['target']['name']}</b> — pass completed.{free} {duel}"
+            line = commentary("pass_ok", actor=actor, target=out["target"]["name"]) + f".{free} {duel}"
         if out.get("pass_advanced"):
             line += "\n     ➡️ the cut-back carries the play a zone forward"
         return line
@@ -1327,8 +1397,7 @@ def describe(out: dict, by_slot: dict | None = None) -> str:
             f"delivery arrived.{free} {duel}"
         )
     if outcome == "intercepted":
-        verb = "reads" if out["action"] in ("pass", "cross") else "cuts out"
-        line = f"🚫 <b>{defender}</b> {verb} <b>{actor}</b>'s delivery. {duel}"
+        line = commentary("intercepted", actor=actor, defender=defender) + f" {duel}"
         if out.get("stopped_by_skill"):
             line = f"🚫 <b>{out['stopped_by_skill']['name']}</b> snuffs out <b>{actor}</b>'s play before it begins."
         if out.get("first_free"):
@@ -1346,27 +1415,27 @@ def describe(out: dict, by_slot: dict | None = None) -> str:
             if out.get("walked"):
                 return f"🚶 <b>{actor}</b> advances unopposed — the road ahead is clear.{free}"
             return f"🌀 <b>{actor}</b> drives forward — no one left to stop him.{free}"
-        return f"🌀 <b>{actor}</b> dribbles past <b>{defender}</b> — he's out of the play. {duel}"
+        return commentary("dribble_ok", actor=actor, defender=defender) + f" {duel}"
     if outcome == "tackled":
         if out.get("stopped_by_skill"):
             return f"🦵 <b>{out['stopped_by_skill']['name']}</b> wins the ball off <b>{actor}</b> outright."
-        return f"🦵 <b>{defender}</b> takes the ball off <b>{actor}</b>. {duel}"
+        return commentary("tackled", actor=actor, defender=defender) + f" {duel}"
     if outcome == "blocked":
         if out.get("gamble_backfire"):
             return f"💀 <b>{actor}</b>'s gamble collapses — <b>{defender}</b> was ready for it all along."
         if out.get("stopped_by_skill"):
             return f"🧱 <b>{out['stopped_by_skill']['name']}</b> throws himself in front of <b>{actor}</b>'s effort."
-        line = f"🧱 <b>{defender}</b> blocks <b>{actor}</b>'s effort. {duel}"
+        line = commentary("blocked", actor=actor, defender=defender) + f" {duel}"
         if out["action"] == "shoot":
-            line = f"🧱 <b>{actor}</b>'s effort is swarmed — the wall holds. {duel}"
+            line = commentary("wall", actor=actor) + f" {duel}"
             if wall_txt:
-                line = f"🧱 <b>{actor}</b>'s effort is swarmed — the wall holds."
+                line = commentary("wall", actor=actor)
                 line += "\n" + wall_txt
         if out.get("first_free"):
             line += "\n     🔁 <b>…but the loss doesn't count.</b> <i>One more try.</i>"
         return line
     if outcome == "goal":
-        line = f"⚽️ <b>GOAL — {actor}</b> beats {KEEPER_NAME}!"
+        line = commentary("goal", actor=actor)
         if out["action"] == "penalty":
             line += f"\n     🎯 <b>{out['att_spot']}</b> in — keeper dived {out['gk_spot']}"
             if out.get("nerve"):
@@ -1390,7 +1459,7 @@ def describe(out: dict, by_slot: dict | None = None) -> str:
     if outcome == "saved":
         catch = out.get("keeper_dist") == "catch"
         head = "holds it 🧤" if catch else "punches it away 💥"
-        line = f"🧤 <b>{KEEPER_NAME}</b> denies <b>{actor}</b> — {head}"
+        line = commentary("saved", actor=actor) + f" {head}"
         if out["action"] == "penalty":
             line += f"\n     🎯 shot {out['att_spot']} — keeper read it"
             line += f"\n     ⚡️ nerve duel <code>{out.get('pen_sho')}</code> vs <code>{out.get('pen_gk')}</code>"

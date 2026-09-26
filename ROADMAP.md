@@ -124,12 +124,12 @@ Ordered by impact ÷ effort. After each phase, `sim_check` must pass (and `balan
 
 ---
 
-### Phase 7 — Goal cinema (⏱ 1 day) 🟢 cheap, high impact
+### Phase 7 — Goal cinema (⏱ 1 day) 🟢 cheap, high impact ✅ shipped 2026-09-25
 
 - **Varied commentary lines:** `engine.describe` is one fixed line per outcome; make a pool of 3–4 variants per outcome + anime quotes on big moments (hat-trick, FLOW goal, double gamble).
 - **Goal scene:** after a goal, render a goal card (name + duel score + activated skill name) — same visual language as `deliver_card`.
 - **Personal celebration:** each player registers their own goal emoji/phrase (`/celebration`) that appears after their goals.
-- **Hall of Fame:** `events` already keeps everything; "goal of the season" with reaction voting.
+- **Hall of Fame:** `events` already keeps everything; "goal of the season" with reaction voting. *(⏳ later — not in this ship)*
 
 ---
 
@@ -166,7 +166,7 @@ Ordered by impact ÷ effort. After each phase, `sim_check` must pass (and `balan
 | 1 anti-AFK + matchlog | 🔴 high | 1 day | ✅ shipped |
 | 2 daily/quests | 🔴 high | 2–3 days | ✅ shipped |
 | 3 FLOW | 🔴 identity | 2 days | ✅ shipped |
-| 7 goal cinema | 🟢 cheap | 1 day | **next** |
+| 7 goal cinema | 🟢 cheap | 1 day | ✅ shipped |
 | 5 rating/leagues | 🟡 high | 2–3 days | after 7 |
 | 6 H2H/cup/bets | 🟡 high | 3 days | after 5 |
 | 4 momentum/tactics | 🟡 medium | 3–4 days | after 6 |
@@ -174,7 +174,7 @@ Ordered by impact ÷ effort. After each phase, `sim_check` must pass (and `balan
 | 8 economy | 🟢 long-term | open | 10 |
 | 10 season | 🟡 tied | 1 day | with 5–6 |
 
-**Suggested path:** Phase 7 goal cinema next → then 5–6 (rating + rivalry) → 4 momentum/tactics.
+**Suggested path:** ~~Phase 7 goal cinema~~ ✅ done (2026-09-25) → next: 5–6 (rating + rivalry) → 4 momentum/tactics.
 
 ---
 

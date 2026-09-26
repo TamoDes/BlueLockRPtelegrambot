@@ -144,6 +144,9 @@ def connect() -> sqlite3.Connection:
             cols = {r[1] for r in _conn.execute("PRAGMA table_info(matches)")}
             if "starter_id" not in cols:
                 _conn.execute("ALTER TABLE matches ADD COLUMN starter_id INTEGER")
+            pcols = {r[1] for r in _conn.execute("PRAGMA table_info(players)")}
+            if "celebration" not in pcols:
+                _conn.execute("ALTER TABLE players ADD COLUMN celebration TEXT")
             _conn.commit()
         return _conn
 
@@ -206,6 +209,11 @@ def touch_player(user_id: int, username: str | None) -> None:
 
 def player(user_id: int) -> sqlite3.Row | None:
     return q1("SELECT * FROM players WHERE user_id=?", (user_id,))
+
+
+def set_celebration(user_id: int, text: str) -> None:
+    with tx() as c:
+        c.execute("UPDATE players SET celebration=? WHERE user_id=?", (text, user_id))
 
 
 def find_player(needle: str) -> sqlite3.Row | None:

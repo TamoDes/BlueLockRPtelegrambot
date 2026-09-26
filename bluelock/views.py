@@ -43,6 +43,35 @@ def stat_block(eff: dict[str, int]) -> str:
     return mono(rows) + "\n"
 
 
+
+def goal_card_text(out: dict, by_slot: dict, celebration: str | None = None) -> str:
+    """Phase 7 goal card: scorer + duel score + skills + personal celebration."""
+    from .fmt import esc
+
+    actor = out.get("actor") or {}
+    name = esc(actor.get("name") or "?")
+    lines = [f"⚽️ <b>GOAL</b> — <b>{name}</b>"]
+    row = by_slot.get(actor.get("slot"))
+    if row is not None and row.get("char_key"):
+        lines.append(f"🎴 {esc(name_of(row['char_key']))}")
+    if out.get("action") == "penalty":
+        lines.append(
+            f"🎯 penalty {out.get('att_spot')} in — keeper dived {out.get('gk_spot')}"
+        )
+    elif out.get("att_total") is not None and out.get("defender") is not None and out.get("def_total") is not None:
+        lines.append(f"⚔️ duel <code>{out['att_total']}</code> vs <code>{out['def_total']}</code>")
+    boosts = out.get("att_boosts") or []
+    skills = [(n, v) for n, v in boosts if not str(n).startswith("🔥")]
+    if skills:
+        lines.append("⚡ " + " · ".join(f"{esc(n)} +{v}" for n, v in skills))
+    if any(str(n).startswith("🔥") for n, _ in boosts):
+        lines.append("🔥 FLOW STATE")
+    if out.get("assister"):
+        lines.append(f"🅰 Assist — <b>{esc(out['assister'].get('name') or '?')}</b>")
+    if celebration:
+        lines.append(f"\n🎉 {esc(celebration)}")
+    return "\n".join(lines)
+
 def clock(turn: int, total_turns: int) -> str:
     return f"{min(90, round(90 * turn / max(1, total_turns)))}′"
 

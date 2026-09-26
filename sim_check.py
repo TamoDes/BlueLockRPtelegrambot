@@ -1081,6 +1081,45 @@ assert "sae_s3" in pend.get("used", []), "unmarked delivery must still spend pas
 assert pend["zone"] == min(ZONE_BOX, 0 + 1 + 2), pend["zone"]
 print("ok  unmarked pass_advance: charge spent, +2 zones applied once")
 
+# --- Phase 7 goal cinema: commentary variants, big moments, goal card, celebration ---
+for _key in ("goal", "pass_ok", "dribble_ok", "tackled", "intercepted", "saved", "blocked", "wall"):
+    assert _key in engine.COMMENTARY, f"missing commentary pool: {_key}"
+    assert len(engine.COMMENTARY[_key]) >= 3, f"{_key} needs at least 3 variants"
+_KW = {
+    "goal": {"actor": "Ace"}, "pass_ok": {"actor": "A", "target": "B"},
+    "dribble_ok": {"actor": "A", "defender": "D"}, "tackled": {"actor": "A", "defender": "D"},
+    "intercepted": {"actor": "A", "defender": "D"}, "saved": {"actor": "A"},
+    "blocked": {"actor": "A", "defender": "D"}, "wall": {"actor": "A"},
+}
+for _key, _pool in engine.COMMENTARY.items():
+    assert _key in _KW, f"no render kwargs defined for {_key}"
+    for _tpl in _pool:
+        _s = _tpl.format(**_KW[_key]).strip()
+        assert _s and "<b>" in _s, (_key, _tpl)
+print("ok  commentary: all 8 pools >= 3 variants, every variant renders clean")
+
+_b = "\n".join(engine.big_moment_lines({"att_boosts": [("🔥flow", 1), ("Deadline", 2)], "gamble_beaten": 3}, 3))
+assert "HAT-TRICK" in _b and "FLOW" in _b and "🎲" in _b, _b
+assert engine.big_moment_lines({"att_boosts": []}, 1) == [], "quiet goals add no noise"
+print("ok  big moments: hat-trick + FLOW + gamble quotes, quiet goals stay clean")
+
+_g_out = {
+    "outcome": "goal", "action": "shoot",
+    "actor": {"name": "Ace", "user_id": fresh}, "defender": {"name": "Wall"},
+    "att_boosts": [("Deadline", 2), ("🔥flow", 1)], "def_boosts": [],
+    "att_total": 9, "def_total": 5,
+}
+_card = views.goal_card_text(_g_out, {1: {"name": "Ace", "char_key": "isagi"}}, "🎉 SIUUU")
+for _mark in ("⚽", "Ace", "Deadline", "🎉 SIUUU", "9", "5"):
+    assert _mark in _card, (_mark, _card)
+print("ok  goal card: scorer, duel score, skill, celebration all render")
+
+db.set_celebration(fresh, "🎉 SIUUU")
+assert db.player(fresh)["celebration"] == "🎉 SIUUU"
+db.set_celebration(fresh, "")
+assert db.player(fresh)["celebration"] in ("", None)
+print("ok  celebration: stored and cleared on the player row")
+
 config.ABILITIES_ENABLED = False
 
 print("\nABILITY SUITE PASSED")

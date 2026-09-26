@@ -5,7 +5,7 @@ import time
 from telebot import types
 
 from . import abilities, db, engine, payouts, views
-from .characters import effective_stats, name_of
+from .characters import chibi_path, effective_stats, name_of
 from .config import (
     DICE_ANIM_SECONDS,
     DICE_EMOJI,
@@ -307,6 +307,30 @@ def prompt_dice(match_id: int) -> None:
         broadcast(match, f"🛡 <b>{who}</b> — roll your defense die.")
 
 
+def send_goal_card(match_id: int, out: dict) -> None:
+    """Phase 7: a photo card after every goal — scorer, duel, celebration."""
+    match = db.match(match_id)
+    if not match:
+        return
+    rows = {r["slot"]: r for r in db.roster(match_id)}
+    actor = out.get("actor") or {}
+    row = rows.get(actor.get("slot"))
+    celeb = None
+    if row is not None and row["user_id"]:
+        prow = db.player(row["user_id"])
+        if prow is not None and "celebration" in prow.keys():
+            celeb = prow["celebration"] or None
+    text = views.goal_card_text(out, rows, celeb)
+    char_key = row["char_key"] if row is not None else None
+    path = chibi_path(char_key) if char_key else None
+    for chat_id in broadcast_targets(match):
+        if path:
+            with path.open("rb") as fh:
+                safe(bot.send_photo, chat_id, fh, caption=text)
+        else:
+            safe(bot.send_message, chat_id, text)
+
+
 def broadcast_targets(match) -> list[int]:
     return list({match["chat_id"], *(r["chat_id"] for r in db.views_of(match["id"]))})
 
@@ -349,11 +373,20 @@ def advance(match_id: int) -> None:
         out = engine.resolve(match_id)
         if out is None:
             return
-        text = engine.describe(out, {r["slot"]: r for r in db.roster(match_id)})
+        roster_rows = {r["slot"]: r for r in db.roster(match_id)}
+        text = engine.describe(out, roster_rows)
         notes = out.get("notes") or []
         full = text + ("\n" + "\n".join(notes) if notes else "")
+        if out.get("outcome") == "goal":
+            scorer = roster_rows.get((out.get("actor") or {}).get("slot"))
+            if scorer is not None:
+                hype = engine.big_moment_lines(out, scorer["goals"])
+                if hype:
+                    full += "\n" + "\n".join(hype)
         db.log_event(match_id, full)
         broadcast(db.match(match_id), full)
+        if out.get("outcome") == "goal":
+            send_goal_card(match_id, out)
 
         match = db.match(match_id)
         if engine.over(match):

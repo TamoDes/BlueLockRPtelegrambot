@@ -80,6 +80,7 @@ def start(message):
         "📅 /daily — Daily yen with a streak\n"
         "🎯 /quests — Daily quests for extra yen\n"
         "🏅 /medals — Your achievements\n"
+        "🎉 /celebration — Your goal celebration\n"
         "📋 /chars — Character list\n"
         "🧤 /keeper — The goalkeeper's limits\n"
         "🏳️ /surrender — Your captain forfeits\n"
@@ -585,6 +586,41 @@ def shop_body(user_id: int) -> str:
     else:
         body += f"{RULE}\n{NO_CHAR}"
     return body
+
+
+@bot.message_handler(commands=["celebration"])
+def celebration(message):
+    seen(message)
+    row = db.player(message.from_user.id)
+    if row is None:
+        safe(bot.reply_to, message, "Register first: /register name")
+        return
+    parts = message.text.split(maxsplit=1)
+    current = row["celebration"] if "celebration" in row.keys() else None
+    if len(parts) == 1:
+        shown = f"current: <i>{esc(current)}</i>" if current else "not set yet"
+        safe(
+            bot.reply_to,
+            message,
+            "🎉 <b>GOAL CELEBRATION</b>\n"
+            f"{shown}\n"
+            "Set it: <code>/celebration text with emoji</code>\n"
+            "Clear: <code>/celebration clear</code>\n"
+            "<i>Fires under your goal card every time you score (max 60 chars).</i>",
+        )
+        return
+    arg = parts[1].strip()
+    if arg.lower() in ("clear", "off", "remove", "delete"):
+        db.set_celebration(message.from_user.id, "")
+        safe(bot.reply_to, message, "🎉 Celebration cleared.")
+        return
+    text = arg.replace("\n", " ").replace("\r", " ")[:60]
+    db.set_celebration(message.from_user.id, text)
+    safe(
+        bot.reply_to,
+        message,
+        f"\u2705 Saved: <i>{esc(text)}</i>\n<i>It appears on every goal you score.</i>",
+    )
 
 
 @bot.message_handler(commands=["shop"])
