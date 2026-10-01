@@ -876,7 +876,7 @@ def activate_flow(match_id: int, user_id: int) -> dict:
                 state["used"].remove(ab.id)
         line = (
             f"🔥🔥 <b>FLOW STATE — {me['name']}</b> 🔥🔥\n"
-            f"<i>The zone swallows him whole. Every skill refilled, every duel +1 — until full time.</i>"
+            f"<i>Every skill refilled, every duel +1 until full time.</i>"
         )
         db.log_event(match_id, line)
         c.execute("UPDATE matches SET pending=? WHERE id=?", (json.dumps(state), match_id))
@@ -1367,11 +1367,11 @@ def big_moment_lines(out: dict, goals: int) -> list[str]:
     """
     notes: list[str] = []
     if goals >= 3:
-        notes.append("🎩 <b>HAT-TRICK!</b> He's taken the match and devoured it whole.")
+        notes.append("🎩 <b>HAT-TRICK!</b>")
     if any(str(n).startswith("🔥") for n, _ in (out.get("att_boosts") or [])):
-        notes.append("🔥 <b>FLOW STATE</b> — the finish came from a place beyond stats.")
+        notes.append("🔥 <b>FLOW STATE</b> finish.")
     if out.get("gamble_beaten"):
-        notes.append(f"🎲 <b>RISK PAID OFF</b> — {out['gamble_beaten']} beaten on the roll of a die.")
+        notes.append(f"🎲 <b>RISK PAID OFF</b> — {out['gamble_beaten']} beaten on the die.")
     return notes
 
 
@@ -1442,7 +1442,7 @@ def describe(out: dict, by_slot: dict | None = None) -> str:
                 line += f"\n     ⚡️ nerve duel <code>{out['pen_sho']}</code> vs <code>{out['pen_gk']}</code>"
             return line
         if out["action"] == "shoot" and wall_txt:
-            line += "\n     🧱 the whole wall was brushed aside:"
+            line += "\n     🧱 every defender beaten:"
             line += "\n" + wall_txt
         elif duel:
             line += f"\n     🛡 {duel}"

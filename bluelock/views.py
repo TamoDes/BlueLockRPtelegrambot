@@ -92,24 +92,22 @@ def rules_text() -> str:
         + HEAVY
         + "\n🌀 <b>Build-up</b>\nPass ➜ Dribble ➜ Shoot. Every action duels"
         " the best free defender:\n<code>your stat + 🎲 vs MET + 🎲</code>\n"
-        "Win and he's beaten for this attack."
-        + quote("➡️ <b>Advance</b> — once EVERY opponent is beaten, dribbling needs no dice: walk the ball a zone forward, free of charge.")
-        + "\n" + quote("⚖️ An exact tie (limit + die both level) is a deadlock — set piece for the attacker.")
-        + "\n🎯 <b>Deadlock</b>\nIn the <b>box → PENALTY</b> 🥶. Anywhere else → <b>FREE KICK</b> 🎯."
+        "Win and he's beaten for this attack.\n"
+        "➡️ <b>Advance</b> — every opponent beaten ➜ dribble a zone forward, no dice.\n"
+        "⚖️ Exact tie = deadlock ➜ set piece for the attacker."
+        + "\n🎯 <b>Deadlock</b>\n<b>Box → PENALTY</b> 🥶 · anywhere else → <b>FREE KICK</b> 🎯."
         + "\n🥶 <b>Free Kick</b>\n<b>Direct</b> — FRK+🎲 vs the keeper alone, no wall."
         "\n<b>Cross</b> — FRK+🎲 vs the best defender; lands in the Final Third with an assist waiting."
         + "\n🥶 <b>Penalty</b>\nNo dice. You pick a corner, their captain calls the dive."
         "\nWrong corner → goal. Read corner → nerve duel:"
         f"\n<code>SHO + 0–{PENALTY_NERVE_SPAN} vs PWR + MET÷2 + 0–{PENALTY_NERVE_SPAN}</code>"
-        + "\n\n🛡 <b>Passives</b> arm themselves the moment their condition holds — no pressing needed."
-        " Each passive carries <b>2 charges</b> per match; tap one to swap which is active."
-        + "\n⚡ <b>Skills</b> are one-shot — press the ⚡ button to arm one;"
-        " 🎲 <b>Gamble</b> skills roll your die and let fate decide the payoff."
+        + "\n\n🛡 <b>Passives</b> arm themselves, <b>2 charges</b>; tap one to swap which is active."
+        "\n⚡ <b>Skills</b> = one-shot, arm with the ⚡ button. 🎲 <b>Gamble</b> = the die decides."
         + quote("Every character fields six abilities — two innate, four earned through levels and yen. Full details in /abilities.")
         + "\n🔥 <b>FLOW STATE</b>\nWin field duels (set pieces don't count) to heat up:"
         "\n3v3 → <b>2</b> wins · 4v4 → <b>3</b> · 5v5 → <b>4</b>. When the 🔥 button glows,"
         " tap it before the next goal — every skill refills and every duel gets <b>+1</b> until full time."
-        + quote("A goal cools the wave: FLOW not spent by then is lost. Devour the moment.")
+        " A goal cools the wave: unspent FLOW is lost."
         + "\n🏁 Ranked races to <b>3</b>. Friendlies run the clock (40%¥ · 60%xp)."
     )
 
@@ -121,11 +119,8 @@ def keeper_card() -> str:
         + f"<i>Open play:</i> your total vs his <code>d6 + {KEEPER_POWER}</code>.\n"
         f"<i>Direct FK:</i> no wall — keeper faces you alone.\n"
         f"<i>Catch {KEEPER_CATCH_ROLL}+</i> — otherwise punched clear.\n"
-        + quote(
-            "Penalties are pure nerve: corners only, no dice. "
-            f"A read corner means SHO + 0–{PENALTY_NERVE_SPAN} against PWR + captain MET÷2 + 0–{PENALTY_NERVE_SPAN}. "
-            "Miss his corner and it's always a goal."
-        )
+        + f"<i>Penalty: corners only, no dice. Read corner → SHO + 0–{PENALTY_NERVE_SPAN} vs "
+        f"PWR + captain MET÷2 + 0–{PENALTY_NERVE_SPAN}; miss his corner → always a goal.</i>"
     )
 
 
@@ -543,31 +538,31 @@ def skill_hint(match_id: int, user_id: int, ab) -> str | None:
         return None
     tag = "🛡 passive" if ab.kind == "passive" else "⚡ skill"
     if ab.gamble:
-        return f"🎲 <b>{esc(ab.name)}</b> ({tag}) — armed. Roll your die: it decides how the gamble plays out."
+        return f"🎲 <b>{esc(ab.name)}</b> ({tag}) — armed. The die decides the payoff."
     if ab.auto == "stop":
-        return f"🛡 <b>{esc(ab.name)}</b> ({tag}) — arming so your next <b>defensive duel</b> auto-wins. Works while you're the marker on an opponent's play."
+        return f"🛡 <b>{esc(ab.name)}</b> ({tag}) — armed: your next defensive duel auto-wins."
     if ab.punch_to_self:
-        return f"🧤 <b>{esc(ab.name)}</b> ({tag}) — arming for a <b>keeper punch</b>: you'll claim the loose ball for your team."
+        return f"🧤 <b>{esc(ab.name)}</b> ({tag}) — armed: you claim the keeper's punched ball."
     if ab.save_self:
-        return f"🧤 <b>{esc(ab.name)}</b> ({tag}) — if your shot is punched clear, you'll get the rebound. Arm it before shooting."
+        return f"🧤 <b>{esc(ab.name)}</b> ({tag}) — armed: you get the rebound if your shot is punched."
     if ab.pass_buff:
-        return f"✨ <b>{esc(ab.name)}</b> ({tag}) — arming a pass: your next completed pass buffs the receiver <b>+{ab.pass_buff}</b>."
+        return f"✨ <b>{esc(ab.name)}</b> ({tag}) — armed: next completed pass gives the receiver +{ab.pass_buff}."
     if ab.pass_advance:
-        return f"➡️ <b>{esc(ab.name)}</b> ({tag}) — arming a pass: the receiver breaks <b>{ab.pass_advance} zone(s)</b> forward and it can't be intercepted."
+        return f"➡️ <b>{esc(ab.name)}</b> ({tag}) — armed: receiver breaks {ab.pass_advance} zone(s), can't be intercepted."
     if ab.pen_edge:
-        return f"🥶 <b>{esc(ab.name)}</b> ({tag}) — arming for a <b>penalty</b>: +{ab.pen_edge} on the nerve check."
+        return f"🥶 <b>{esc(ab.name)}</b> ({tag}) — armed: +{ab.pen_edge} on the penalty nerve check."
     if ab.tackle_keep:
-        return f"🌀 <b>{esc(ab.name)}</b> ({tag}) — if you're tackled, you'll keep the ball and advance anyway."
+        return f"🌀 <b>{esc(ab.name)}</b> ({tag}) — armed: tackled → you keep the ball and advance."
     if ab.gk_down:
-        return f"⚽ <b>{esc(ab.name)}</b> ({tag}) — arming a <b>shot</b>: the keeper plays <b>−{ab.gk_down}</b>."
+        return f"⚽ <b>{esc(ab.name)}</b> ({tag}) — armed: keeper −{ab.gk_down} on your shot."
     if ab.auto == "win":
-        return f"⚡ <b>{esc(ab.name)}</b> ({tag}) — arming an unstoppable move that auto-beats your marker."
+        return f"⚡ <b>{esc(ab.name)}</b> ({tag}) — armed: beats your marker with no roll."
     if ab.dfd is not None:
-        return f"🛡 <b>{esc(ab.name)}</b> ({tag}) — arming a defensive stand: extra power on your next marking duel."
+        return f"🛡 <b>{esc(ab.name)}</b> ({tag}) — armed: extra power on your next marking duel."
     if ab.first_free:
-        return f"🔁 <b>{esc(ab.name)}</b> ({tag}) — armed: your FIRST lost duel this match gets devoured — no loss, one more try."
+        return f"🔁 <b>{esc(ab.name)}</b> ({tag}) — armed: your first lost duel doesn't count."
     if ab.att is not None:
-        return f"⚡ <b>{esc(ab.name)}</b> ({tag}) — arming an offensive burst that fires on your next play in the right spot."
+        return f"⚡ <b>{esc(ab.name)}</b> ({tag}) — armed: fires on your next play in the right spot."
     return None
 
 
@@ -592,8 +587,7 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
         f"⚡ <b>EQUIPMENT</b>\n"
         f"{icon_of(char_key)}<b>{esc(name_of(char_key))}</b> · {overall(effective_stats(char_key, {}))} OVR\n"
         f"<i>{esc(role_of(char_key))}</i>\n{RULE}\n"
-        "<i>🛡 Passives fire on their own — 2 charges each; they arm themselves when the condition holds. "
-        "⚡ Skills are one-shot per match. 🎲 Gamble skills roll the die and let fate decide.</i>\n"
+        "<i>🛡 passives arm themselves ×2 · ⚡ skills = once per match · 🎲 gamble = the die decides</i>\n"
     )
     blocks = []
     for ab in abilities.kit_for_char(char_key):
@@ -606,7 +600,7 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
         title = f"{icon} <b>{ab.name}</b>{f'<i>{tag}{kind_tag}{cat_tag}</i>' if (tag or kind_tag or cat_tag) else ''}"
         if ab.tier == 1 or ab.id in owned:
             blocks.append(
-                f"{title}\n{quote(esc(ab.flavor))}\n{ab.desc}"
+                f"{title}\n{ab.desc}"
             )
         else:
             gate = f"🔒 Lv {need_lv} · {yen_short(cost)}"
