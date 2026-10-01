@@ -108,7 +108,7 @@ def rules_text() -> str:
         "\n3v3 → <b>2</b> wins · 4v4 → <b>3</b> · 5v5 → <b>4</b>. When the 🔥 button glows,"
         " tap it before the next goal — every skill refills and every duel gets <b>+1</b> until full time."
         " A goal cools the wave: unspent FLOW is lost."
-        + "\n🏁 Ranked races to <b>3</b>. Friendlies run the clock (40%¥ · 60%xp)."
+        + "\n🏁 Ranked races to <b>3</b>. Friendly matches run the clock."
     )
 
 

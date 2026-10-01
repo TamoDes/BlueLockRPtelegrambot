@@ -59,9 +59,7 @@ def newmatch(message):
         bot.reply_to,
         message,
         HDR_MATCH
-        + "Pick a format:\n"
-        + f"🥇 <b>Ranked</b> — first to {GOAL_TARGET}, full payout\n"
-        + "⏱ <b>Friendly</b> — fixed clock, 40%¥ · 60%xp\n"
+        + f"🥇 <b>Ranked</b> — first to {GOAL_TARGET}.\n"
         + "<i>Others join via /matches from any chat.</i>",
         reply_markup=new_match_keyboard(),
     )

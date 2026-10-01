@@ -90,8 +90,13 @@ def action(target: str, nav_to: str):
 @reg("hub")
 def hub_panel(ctx: int, page: int):
     row = db.stat_summary()
+    from . import config as cfg
+    phase = cfg.active_phase()
     text = (
         "🛠 <b>ADMIN PANEL</b>\n" + RULE + "\n"
+        f"🗓 Season <b>{cfg.SEASON}</b> · {cfg.phase_label(phase)}\n"
+        + (f"🧪 <i>Test season — no yen, no xp, everything free.</i>\n" if cfg.is_test_phase(phase) else "")
+        + RULE + "\n"
         f"👥 {row['players']} players · 🃏 {row['chars']} chars\n"
         f"💰 Σ{yen_short(row['yen'])} in wallets · {row['unlocks']} unlocks\n"
         f"⚔️ {row['open']} open · 🟢 {row['live']} live · Σ{row['matches_total']} matches\n"
@@ -114,6 +119,7 @@ def hub_panel(ctx: int, page: int):
         types.InlineKeyboardButton("📢 Broadcast", callback_data="adm|broadcast|0|0"),
         types.InlineKeyboardButton("⚙️ Engine / Config", callback_data="adm|config|0|0"),
     )
+    kb.add(types.InlineKeyboardButton("🗓 Seasons", callback_data="adm|seasons|0|0"))
     return text, kb
 
 
@@ -1015,13 +1021,116 @@ def asay_cmd(message):
 
 # ------------------------------------------------------------------ config / engine
 
+# ------------------------------------------------------------------ seasons
+
+
+@reg("seasons")
+def seasons_panel(ctx: int, page: int):
+    from . import config as cfg
+
+    db.ensure_season(cfg.SEASON)
+    db.ensure_season(1)
+    db.ensure_season(0)
+    phase = cfg.active_phase()
+    rows = db.q("SELECT * FROM seasons ORDER BY n DESC")
+    lines = []
+    for r in rows:
+        mark = "▶️" if r["n"] == cfg.SEASON else "·"
+        note = f" · {esc(r['note'])}" if r["note"] else ""
+        lines.append(f"{mark} <b>S{r['n']}</b> — {cfg.phase_label(r['phase'])}{note}")
+    text = (
+        "🗓 <b>SEASONS</b>\n" + RULE + "\n"
+        f"Running: <b>S{cfg.SEASON}</b> · {cfg.phase_label(phase)}\n"
+        + RULE + "\n"
+        + "\n".join(lines) + "\n"
+        + RULE + "\n"
+        "<i>🧪 <b>test</b> = sandbox season: no yen, no xp, purchases free, nothing is "
+        "credited. 🏆 <b>live</b> = real season. New seasons start in test.</i>"
+    )
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    other = "live" if phase == "test" else "test"
+    label = "🏆 Go LIVE" if phase == "test" else "🧪 Back to TEST"
+    kb.add(types.InlineKeyboardButton(label, callback_data="adm|sphase|0|0"))
+    kb.add(types.InlineKeyboardButton("🆕 New season (wipe yen/xp/unlocks)", callback_data="adm|snewask|0|0"))
+    kb.add(types.InlineKeyboardButton("📝 Set note", callback_data="adm|snote|0|0"))
+    kb.add(types.InlineKeyboardButton("↩︎ Hub", callback_data="adm|hub|0|0"))
+    return text, kb
+
+
+@action("sphase", "seasons")
+def act_sphase(call, ctx):
+    from . import config as cfg
+
+    phase = cfg.active_phase()
+    other = "live" if phase == "test" else "test"
+    db.set_season_phase(cfg.SEASON, other)
+    db.set_setting(cfg.SEASON_PHASE_KEY, other)
+    if other == "live":
+        return True, "🏆 Season is LIVE — payouts and prices are real now."
+    return True, "🧪 Season is TEST — no yen, no xp, everything free."
+
+
+@reg("snewask")
+def snewask_panel(ctx: int, page: int):
+    from . import config as cfg
+
+    nxt = db.next_season_n()
+    text = (
+        "🆕 <b>START NEW SEASON</b>\n" + RULE + "\n"
+        f"Next season number: <b>S{nxt}</b>\n"
+        f"Running season <b>S{cfg.SEASON}</b> will be closed.\n"
+        + RULE + "\n"
+        "This <b>wipes</b>: yen, xp, training boosts, ability unlocks, titles, "
+        "daily/quest state and medals.\n"
+        "It <b>keeps</b>: characters, match history and career records.\n"
+        f"<i>New season starts in 🧪 TEST.</i>"
+    )
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(types.InlineKeyboardButton("💣 CONFIRM NEW SEASON", callback_data="adm|snew|0|0"))
+    kb.add(types.InlineKeyboardButton("↩︎ Cancel", callback_data="adm|seasons|0|0"))
+    return text, kb
+
+
+@action("snew", "seasons")
+def act_snew(call, ctx):
+    from . import config as cfg
+
+    nxt = db.next_season_n()
+    if nxt == cfg.SEASON:
+        return False, f"S{nxt} is already the running season."
+    db.ensure_season(nxt)
+    db.set_season_note(cfg.SEASON, f"closed → S{nxt}")
+    db.wipe_season_state(nxt)
+    db.set_season_phase(nxt, "test")
+    db.set_setting(cfg.SEASON_PHASE_KEY, "test")
+    db.set_setting("season_current", str(nxt))
+    return True, f"🆕 S{nxt} started in 🧪 TEST — state wiped."
+
+
+@action("snote", "seasons")
+def act_snote(call, ctx):
+    return False, "Send: /aseason Note text (empty clears the note)."
+
+
+@bot.message_handler(commands=["aseason"], func=lambda m: is_admin(m))
+def aseason_cmd(message):
+    seen(message)
+    from . import config as cfg
+
+    parts = message.text.split(maxsplit=1)
+    db.ensure_season(cfg.SEASON)
+    note = parts[1].strip() if len(parts) > 1 else ""
+    db.set_season_note(cfg.SEASON, note or None)
+    safe(bot.reply_to, message, f"📝 S{cfg.SEASON} note: <b>{esc(note) or '—'}</b>")
+
+
 @reg("config")
 def config_panel(ctx: int, page: int):
     from . import config as cfg
     state = db.q1("SELECT COUNT(*) AS n FROM matches WHERE status IN ('open','live')")["n"]
     text = (
         "⚙️ <b>ENGINE / CONFIG</b>\n" + RULE + "\n"
-        f"Season <b>{cfg.SEASON}</b> · race to <b>{cfg.GOAL_TARGET}</b>\n"
+        f"Season <b>{cfg.SEASON}</b> · {cfg.phase_label(cfg.active_phase())} · race to <b>{cfg.GOAL_TARGET}</b>\n"
         f"Dice d{cfg.DICE_FACES} · keeper PWR {cfg.KEEPER_POWER} (catch {cfg.KEEPER_CATCH_ROLL}+)\n"
         f"Yen: goal {yen_short(cfg.GOAL_VALUE)} · assist {yen_short(cfg.ASSIST_VALUE)} · win {yen_short(cfg.WIN_VALUE)}\n"
         f"XP/level {cfg.XP_PER_LEVEL} · abilities {'on' if cfg.ABILITIES_ENABLED else 'off'}\n"
@@ -1035,7 +1144,10 @@ def config_panel(ctx: int, page: int):
         types.InlineKeyboardButton("🧹 Sweep stale lobbies", callback_data="adm|csweep|0|0"),
         types.InlineKeyboardButton("📊 DB stats", callback_data="adm|cstats|0|0"),
     )
-    kb.add(types.InlineKeyboardButton("↩︎ Hub", callback_data="adm|hub|0|0"))
+    kb.add(
+        types.InlineKeyboardButton("🗓 Seasons", callback_data="adm|seasons|0|0"),
+        types.InlineKeyboardButton("↩︎ Hub", callback_data="adm|hub|0|0"),
+    )
     return text, kb
 
 

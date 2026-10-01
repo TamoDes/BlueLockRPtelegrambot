@@ -24,7 +24,7 @@ import bluelock.db as db
 db.DB_PATH = TEST_DB
 db._conn = None
 
-from bluelock import abilities, characters, engine, fmt, payouts, views
+from bluelock import abilities, characters, economy, engine, fmt, payouts, views
 from bluelock.config import (
     DICE_FACES,
     GOAL_TARGET,
@@ -36,6 +36,8 @@ from bluelock.config import (
 )
 
 db.connect()
+db.ensure_season(config.SEASON)
+db.set_setting(config.SEASON_PHASE_KEY, "live")   # main suite exercises real payouts
 
 USERS = [(101, "alpha"), (102, "beta"), (103, "gamma"), (104, "delta")]
 for uid, uname in USERS:
@@ -278,7 +280,8 @@ assert engine.over(final), "match must reach a decision"
 target_hit = max(final["score1"], final["score2"]) >= GOAL_TARGET
 turn_capped = final["turn"] > max_turns(final["size"], "ranked")
 assert target_hit ^ turn_capped, "exactly one end condition decides the match"
-assert engine.turn_limit(final) == max_turns(final["size"], "ranked") > max_turns(final["size"], "friendly")
+assert engine.turn_limit(final) == max_turns(final["size"], "ranked") > max_turns(final["size"], "casual")
+assert "friendly" not in config.MODES and config.MODES == {"ranked": "Ranked"}
 
 before_yen = {uid: db.player(uid)["yen"] for uid, _ in USERS}
 report, level_ups = payouts.settle(match_id)
@@ -306,7 +309,7 @@ print("=" * 46)
 print(views.leaderboard_text("goals"))
 print("=" * 46)
 
-duel_match = db.create_match(-777, "friendly", 1)
+duel_match = db.create_match(-777, "clock", 1)
 for uid, team in ((101, 1), (103, 2)):
     o = db.owned_by(uid)
     db.join_match(duel_match, team, uid, f"P{uid}", o["char_key"],
@@ -323,7 +326,7 @@ assert db.live_duel_in(-777) is None
 assert "error" in engine.open_duel(duel_match, "penalty", None), "no set piece without a foul"
 assert "error" in engine.open_duel(duel_match, "shoot", None), "no shooting from the opening zone"
 
-pm_match = db.create_match(101, "friendly", 1)
+pm_match = db.create_match(101, "clock", 1)
 for uid, team in ((101, 1), (103, 2)):
     o = db.owned_by(uid)
     db.join_match(pm_match, team, uid, f"PM{uid}", o["char_key"],
@@ -410,7 +413,7 @@ assert db.views_of(pm_match) == []
 print("=" * 46)
 
 # --- ADVANCE: unmarked open play walks a zone without dice ------------------
-adv_match = db.create_match(-888, "friendly", 1)
+adv_match = db.create_match(-888, "clock", 1)
 for uid, team in ((101, 1), (103, 2)):
     o = db.owned_by(uid)
     db.join_match(adv_match, team, uid, f"AD{uid}", o["char_key"],
@@ -453,8 +456,8 @@ print("=" * 46)
 
 # --- KICKOFF: from the back, alternating teams ------------------------------
 # both matches share one chat_id so the alternation can see the previous kickoff
-kb1 = db.create_match(-700, "friendly", 2)
-kb2 = db.create_match(-700, "friendly", 2)
+kb1 = db.create_match(-700, "clock", 2)
+kb2 = db.create_match(-700, "clock", 2)
 for mid_kb in (kb1, kb2):
     for uid, team in ((101, 1), (102, 1), (103, 2), (104, 2)):
         o = db.owned_by(uid)
@@ -491,7 +494,7 @@ assert _ab_mod.category_of(_ab_mod.get("isagi_p2")) == "core", "first_free alone
 assert _ab_mod.category_of(_ab_mod.get("kaiser_s1")) == "draw"
 print("ok  ability catalog synced:", dict(sorted(stats.items())))
 
-fx_match = db.create_match(-555, "friendly", 2)
+fx_match = db.create_match(-555, "clock", 2)
 for uid, team in ((101, 1), (102, 1), (103, 2), (104, 2)):
     o = db.owned_by(uid)
     db.join_match(fx_match, team, uid, f"FX{uid}", o["char_key"],
@@ -530,7 +533,7 @@ db.touch_player(997, "alpha")
 assert db.player(101)["username"] is None
 assert db.player(997)["username"] == "alpha"
 
-race_match = db.create_match(-1, "friendly", 1)
+race_match = db.create_match(-1, "clock", 1)
 outcomes = []
 barrier = threading.Barrier(8)
 
@@ -577,7 +580,7 @@ def make_user(char_key: str, unlocks: list[str] | None = None) -> int:
 
 
 def build_match(pairs: list[tuple[int, int]]) -> int:
-    mid = db.create_match(-(100000 + next(NEXT_UID)), "friendly", len(pairs))
+    mid = db.create_match(-(100000 + next(NEXT_UID)), "ranked", len(pairs))
     for team, uids in ((1, [p[0] for p in pairs]), (2, [p[1] for p in pairs])):
         for uid in uids:
             o = db.owned_by(uid)
@@ -1154,6 +1157,80 @@ db.set_title(fresh, None)
 print("ok  titles page: equipped title marked, presets wired, back works")
 
 config.ABILITIES_ENABLED = False
+
+# ------------------------------------------------------------------ seasons
+db.ensure_season(config.SEASON)
+assert db.season_phase(config.SEASON) in ("test", "live")
+
+# phase helpers
+db.set_setting(config.SEASON_PHASE_KEY, "test")
+assert config.active_phase() == "test" and config.test_mode() is True
+assert config.phase_label("test").startswith("\U0001f9ea")
+db.set_setting(config.SEASON_PHASE_KEY, "live")
+assert config.active_phase() == "live" and config.test_mode() is False
+print("ok  season phase helpers: test/live resolve from settings")
+
+# test season: a finished match pays no yen and no xp
+db.set_setting(config.SEASON_PHASE_KEY, "test")
+sandbox_uid = next(NEXT_UID)
+db.touch_player(sandbox_uid, f"sb{sandbox_uid}")
+_free_key = next(k for k in characters.ROSTER if k not in db.taken_keys())
+db.assign_char(sandbox_uid, _free_key)
+sb_match = db.create_match(-4242, "ranked", 2, sandbox_uid)
+for slot, uid in ((1, sandbox_uid), (2, sandbox_uid)):
+    db.touch_player(uid, f"sb{uid}")
+with db.tx() as _c:
+    _c.execute(
+        "INSERT INTO match_players(match_id, slot, user_id, name, char_key, team, goals, assists, actions, stops, stats) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (sb_match, slot, uid, f"sb{uid}", None, slot, 1, 0, 3, 1, "{}"),
+    )
+db.update_match(sb_match, status="live", score1=3, score2=1)
+sb_before = db.player(sandbox_uid)["yen"]
+sb_xp_before = db.player(sandbox_uid)["xp"]
+sb_report, _ = payouts.settle(sb_match)
+assert "Test season" in sb_report, sb_report
+assert db.player(sandbox_uid)["yen"] == sb_before, "test season must not pay yen"
+assert db.player(sandbox_uid)["xp"] == sb_xp_before, "test season must not pay xp"
+ledger = db.q1("SELECT COALESCE(SUM(amount),0) AS n FROM wallet_tx WHERE user_id=?", (sandbox_uid,))["n"]
+assert ledger == 0, "test season must not touch the wallet ledger"
+print("ok  test season: match pays 0 yen / 0 xp and still settles")
+
+# test season: purchases are free, daily/quests pay nothing, medals stay locked
+assert db.spend_yen(sandbox_uid, 9_999_999, "sandbox train") is True
+assert db.add_yen(sandbox_uid, 5_000_000, "sandbox grant") == db.player(sandbox_uid)["yen"]
+assert economy.daily_amount(3) == 0
+db.set_setting(config.SEASON_PHASE_KEY, "live")
+assert economy.daily_amount(3) > 0
+print("ok  test season: purchases free, no earnings, medals skipped")
+
+# season panel renders + switching phase is persisted
+from bluelock import handlers_admin  # noqa: F401
+assert callable(handlers_admin.seasons_panel)
+txt, kb = handlers_admin.seasons_panel(0, 0)
+assert "SEASONS" in txt
+cbs = [b.callback_data for row in kb.keyboard for b in row]
+assert "adm|sphase|0|0" in cbs and "adm|snewask|0|0" in cbs, cbs
+print("ok  admin seasons panel: phase + new-season buttons wired")
+
+# new season wipes postable state but keeps characters
+def _wipe_probe():
+    db.set_setting(config.SEASON_PHASE_KEY, "test")
+    keeper = db.player(sandbox_uid)["yen"]
+    db.add_yen(sandbox_uid, 1_000_000, "pre-wipe")
+    db.bump_boost(sandbox_uid, "shot", 2)
+    db.set_title(sandbox_uid, "Wiped")
+    db.wipe_season_state(db.next_season_n())
+    row = db.player(sandbox_uid)
+    assert row["yen"] == 0 and row["xp"] == 0 and row["title"] in (None, ""), dict(row)
+    assert db.owned_by(sandbox_uid) is not None, "characters must survive a wipe"
+    assert json.loads(db.owned_by(sandbox_uid)["boosts"]) == {}, "boosts reset"
+    return keeper
+
+_wipe_probe()
+print("ok  new season: yen/xp/boosts/titles wiped, characters kept")
+
+db.set_setting(config.SEASON_PHASE_KEY, "live")
 
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

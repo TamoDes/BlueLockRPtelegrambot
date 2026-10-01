@@ -38,6 +38,23 @@ ADMIN_IDS = {
 
 SEASON = int(os.environ.get("BLUELOCK_SEASON", "1"))
 
+# active season phase: 'test' (sandbox, no yen/xp) or 'live' — set from the admin
+# panel, persisted in the settings table, read fresh on every payout.
+SEASON_PHASE_KEY = "season_phase"
+
+
+def active_phase() -> str:
+    from . import db
+    phase = db.get_setting(SEASON_PHASE_KEY)
+    if phase not in SEASON_PHASES:
+        phase = "test"
+    return phase
+
+
+def test_mode() -> bool:
+    """True while the running season is a test/beta season."""
+    return is_test_phase(active_phase())
+
 ABILITIES_ENABLED = os.environ.get("BLUELOCK_ABILITIES", "1") not in ("0", "false", "no")
 
 DICE_FACES = 6
@@ -75,8 +92,21 @@ ASSIST_VALUE = 150_000
 WIN_VALUE = 500_000
 DRAW_VALUE = 150_000
 PLAY_VALUE = 50_000
-FRIENDLY_RATE = 0.4
-FRIENDLY_XP_RATE = 0.6
+# --- seasons (test phase = no yen, no xp) ------------------------------------
+SEASON_PHASES = ("test", "live")
+TEST_PHASE_TEXT = {
+    "test": "🧪 TEST",
+    "live": "🏆 LIVE",
+}
+
+
+def phase_label(phase: str) -> str:
+    return TEST_PHASE_TEXT.get(phase, TEST_PHASE_TEXT["test"])
+
+
+def is_test_phase(phase: str) -> bool:
+    """Test seasons are sandbox: matches, daily and quests pay no yen/xp."""
+    return phase != "live"
 MOTM_VALUE = 250_000
 
 REROLL_COST = 1_000_000
@@ -106,7 +136,7 @@ XP_PER_LEVEL = 260
 LEVEL_UP_BONUS = 250_000
 
 SIZES = (1, 2, 3, 4, 5)
-MODES = {"ranked": "Ranked", "friendly": "Friendly"}
+MODES = {"ranked": "Ranked"}
 GOAL_TARGET = 3
 RANKED_TURN_SLACK = 6
 LOG_KEEP = 5
@@ -157,7 +187,7 @@ RARITY_WEIGHT = {"SSR": 3, "SR": 11, "R": 26, "N": 42}
 RARITY_MARK = {"SSR": "✦SSR", "SR": "✦SR", "R": "R", "N": "N"}
 
 
-def max_turns(size: int, mode: str = "friendly") -> int:
+def max_turns(size: int, mode: str = "ranked") -> int:
     base = 8 + 4 * size
     return base * RANKED_TURN_SLACK if mode == "ranked" else base
 

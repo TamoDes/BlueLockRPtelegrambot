@@ -109,7 +109,7 @@ Ordered by impact ÷ effort. After each phase, `sim_check` must pass (and `balan
 
 **Why:** "Ranked" is currently just the "first to 3" rule; nothing accumulates. A persistent number = a long-term goal.
 
-- **Simple ELO:** one `rating` column on `players`; updated by `payouts.settle` (full-weight ranked, half-weight friendly).
+- **Simple ELO:** one `rating` column on `players`; updated by `payouts.settle`.
 - **`/top rating`** joins the leaderboard.
 - **Leagues:** Bronze→Diamond like Hamster Kombat; season-end promotion/relegation + prizes.
 - Later: matchmaking — "a player at your level is online: challenge button" (`/challenge @user`).

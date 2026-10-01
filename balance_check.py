@@ -125,6 +125,6 @@ print()
 report("1v1 SSR vs SSR", "rin", "rin", size=1, runs=200)
 report("3v3 SR vs SR", "yukimiya", "yukimiya", size=3, runs=150)
 print()
-report("friendly SR vs SR", "yukimiya", "yukimiya", runs=200, mode="friendly")
+report("clock-mode SR vs SR", "yukimiya", "yukimiya", runs=200, mode="clock")
 
 db._conn.close()

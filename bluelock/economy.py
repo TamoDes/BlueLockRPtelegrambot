@@ -8,6 +8,7 @@ from .config import (
     DAILY_STEP,
     QUESTS_PER_DAY,
     QUEST_REWARD,
+    test_mode,
 )
 
 
@@ -18,6 +19,8 @@ def local_day(ts: int | None = None) -> int:
 
 
 def daily_amount(streak: int) -> int:
+    if test_mode():
+        return 0
     return DAILY_BASE + DAILY_STEP * min(max(0, streak - 1), DAILY_MAX_STREAK - 1)
 
 
@@ -141,8 +144,10 @@ def claim_quest(user_id: int, qid: str, day: int) -> int | None:
         return None
     state["claimed"].append(qid)
     db.set_quest_state(user_id, day, state["progress"], state["claimed"])
-    db.add_yen(user_id, QUEST_REWARD, f"quest: {quest_def(qid)[1]}")
-    return QUEST_REWARD
+    reward = 0 if test_mode() else QUEST_REWARD
+    if reward:
+        db.add_yen(user_id, reward, f"quest: {quest_def(qid)[1]}")
+    return reward
 
 
 def quests_summary(user_id: int, day: int) -> str:
@@ -201,6 +206,8 @@ def check_and_grant(user_id: int) -> list[str]:
         ("veteran", career["played"] >= 25),
         ("rich", row and row["yen"] >= 5_000_000),
     ]
+    if test_mode():
+        return new
     for medal, ok in checks:
         if ok and db.grant_achievement(user_id, medal):
             new.append(medal)

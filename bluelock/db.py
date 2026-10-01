@@ -129,6 +129,19 @@ CREATE TABLE IF NOT EXISTS achievements (
     earned_at  INTEGER NOT NULL,
     PRIMARY KEY (user_id, medal)
 );
+
+CREATE TABLE IF NOT EXISTS seasons (
+    n          INTEGER PRIMARY KEY,
+    phase      TEXT NOT NULL DEFAULT 'test',
+    started_at INTEGER NOT NULL,
+    ended_at   INTEGER,
+    note       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
 """
 
 
@@ -180,6 +193,79 @@ def q(sql: str, params=()) -> list[sqlite3.Row]:
 def q1(sql: str, params=()) -> sqlite3.Row | None:
     with tx() as c:
         return c.execute(sql, params).fetchone()
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    row = q1("SELECT value FROM settings WHERE key=?", (key,))
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with tx() as c:
+        c.execute(
+            "INSERT INTO settings(key, value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+
+# ------------------------------------------------------------------ seasons
+
+def ensure_season(n: int) -> None:
+    with tx() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO seasons(n, phase, started_at) VALUES(?,?,?)",
+            (n, "test", now()),
+        )
+
+
+def seasons_page(offset: int, limit: int) -> list[sqlite3.Row]:
+    return q("SELECT * FROM seasons ORDER BY n DESC LIMIT ? OFFSET ?", (limit, offset))
+
+
+def count_seasons() -> int:
+    return q1("SELECT COUNT(*) AS n FROM seasons")["n"]
+
+
+def season_row(n: int) -> sqlite3.Row | None:
+    return q1("SELECT * FROM seasons WHERE n=?", (n,))
+
+
+def season_phase(n: int) -> str:
+    row = season_row(n)
+    return row["phase"] if row else "test"
+
+
+def set_season_phase(n: int, phase: str) -> None:
+    with tx() as c:
+        c.execute("UPDATE seasons SET phase=? WHERE n=?", (phase, n))
+
+
+def set_season_note(n: int, note: str | None) -> None:
+    with tx() as c:
+        c.execute("UPDATE seasons SET note=? WHERE n=?", (note, n))
+
+
+def next_season_n() -> int:
+    row = q1("SELECT COALESCE(MAX(n), 0) + 1 AS n FROM seasons")
+    return row["n"]
+
+
+def wipe_season_state(n: int) -> dict:
+    """Reset everything season-scoped for a fresh season: wallets, xp, unlocks,
+    training boosts, daily/quest state and balances. Keeps characters + records."""
+    with tx() as c:
+        players = c.execute("SELECT COUNT(*) AS n FROM players").fetchone()["n"]
+        c.execute("UPDATE players SET yen=0, xp=0, title=NULL")
+        c.execute("DELETE FROM wallet_tx")
+        c.execute("DELETE FROM pending_yen")
+        c.execute("UPDATE owned SET boosts='{}'")
+        c.execute("DELETE FROM unlocks")
+        c.execute("DELETE FROM daily")
+        c.execute("DELETE FROM quest_progress")
+        c.execute("DELETE FROM achievements")
+        c.execute("UPDATE matches SET season=? WHERE status IN ('open','live')", (n,))
+        return {"players": players}
 
 
 def touch_player(user_id: int, username: str | None) -> None:
@@ -239,6 +325,11 @@ def set_display(user_id: int, name: str) -> bool:
 
 
 def add_yen(user_id: int, amount: int, reason: str) -> int:
+    from .config import test_mode
+
+    if test_mode() and amount > 0:
+        row = q1("SELECT yen FROM players WHERE user_id=?", (user_id,))
+        return row["yen"] if row else 0
     with tx() as c:
         c.execute("UPDATE players SET yen = yen + ? WHERE user_id=?", (amount, user_id))
         c.execute(
@@ -250,6 +341,10 @@ def add_yen(user_id: int, amount: int, reason: str) -> int:
 
 
 def spend_yen(user_id: int, amount: int, reason: str) -> bool:
+    from .config import test_mode
+
+    if test_mode():
+        return True
     with tx() as c:
         row = c.execute("SELECT yen FROM players WHERE user_id=?", (user_id,)).fetchone()
         if not row or row["yen"] < amount:

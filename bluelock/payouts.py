@@ -2,8 +2,6 @@ from . import db, economy
 from .config import (
     ASSIST_VALUE,
     DRAW_VALUE,
-    FRIENDLY_RATE,
-    FRIENDLY_XP_RATE,
     GOAL_TARGET,
     GOAL_VALUE,
     LEVEL_UP_BONUS,
@@ -19,6 +17,7 @@ from .config import (
     XP_STOP,
     XP_WIN,
     level_for,
+    test_mode,
 )
 from .fmt import HEAVY, RULE, clip, esc, yen_short
 
@@ -34,9 +33,9 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
 
     match = db.match(match_id)
     roster = db.roster(match_id)
-    friendly = match["mode"] == "friendly"
-    rate = FRIENDLY_RATE if friendly else 1.0
-    xp_rate = FRIENDLY_XP_RATE if friendly else 1.0
+    sandbox = test_mode()
+    rate = 0.0 if sandbox else 1.0
+    xp_rate = 0.0 if sandbox else 1.0
     s1, s2 = match["score1"], match["score2"]
 
     level_ups = []
@@ -77,7 +76,7 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
         db.add_xp(r["user_id"], gained_xp)
         new_level = level_for(db.player(r["user_id"])["xp"])
         if new_level > old_level:
-            payout += LEVEL_UP_BONUS * (new_level - old_level)
+            payout += 0 if sandbox else LEVEL_UP_BONUS * (new_level - old_level)
             level_ups.append((r["user_id"], old_level, new_level))
         db.add_yen(r["user_id"], payout + bonus, f"match #{match_id}")
 
@@ -93,7 +92,7 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
     else:
         winner = "🔵 <b>Blue</b>" if s1 > s2 else "🔴 <b>Red</b>"
         verdict = f"🏆 {winner} wins <b>{s1}—{s2}</b>"
-        if max(s1, s2) >= GOAL_TARGET and not friendly:
+        if max(s1, s2) >= GOAL_TARGET:
             verdict += f"\n🥇 Hit {GOAL_TARGET} first."
 
     lines = []
@@ -133,8 +132,8 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
         report += f"\n📈 Level-up bonus × {len(level_ups)}"
     if new_medals:
         report += "\n🏅 " + " · ".join(f"{esc(name)} earned {economy.medal_label(medal)}" for name, medal in new_medals[:6])
-    if friendly:
-        report += "\n<i>Friendly — 40%¥ · 60%xp applied.</i>"
+    if sandbox:
+        report += "\n🧪 <i>Test season — no yen, no xp. Stats still count.</i>"
     return report, level_ups
 
 
