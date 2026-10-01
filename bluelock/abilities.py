@@ -178,7 +178,7 @@ _KITS = [
             "Lost field duel → his team wins the set piece.",
             on_lost="foul")),
         _reg(Ability("kaiser_p2", "kaiser", "passive", 2, "Magnus Deuce",
-            "+2 on penalty nerve checks.",
+            "+2 — sends the keeper the wrong way.",
             pen_edge=2)),
         _reg(Ability("kaiser_s2", "kaiser", "skill", 3, "Der Übermensch",
             "Shot scores even if the keeper is within 1 of his total.",

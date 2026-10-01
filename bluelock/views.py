@@ -14,7 +14,6 @@ from .config import (
     MAX_BOOST,
     MAX_STAT,
     MODES,
-    PENALTY_NERVE_SPAN,
     REROLL_COST,
     STATS,
     TITLE_COST,
@@ -99,8 +98,7 @@ def rules_text() -> str:
         + "\n🥶 <b>Free Kick</b>\n<b>Direct</b> — FRK+🎲 vs the keeper alone, no wall."
         "\n<b>Cross</b> — FRK+🎲 vs the best defender; lands in the Final Third with an assist waiting."
         + "\n🥶 <b>Penalty</b>\nNo dice. You pick a corner, their captain calls the dive."
-        "\nWrong corner → goal. Read corner → nerve duel:"
-        f"\n<code>SHO + 0–{PENALTY_NERVE_SPAN} vs PWR + MET÷2 + 0–{PENALTY_NERVE_SPAN}</code>"
+        "\nWrong corner → goal. Read corner → <b>always kept out</b>."
         + "\n\n🛡 <b>Passives</b> arm themselves, <b>2 charges</b>; tap one to swap which is active."
         "\n⚡ <b>Skills</b> = one-shot, arm with the ⚡ button. 🎲 <b>Gamble</b> = the die decides."
         + quote("Every character fields six abilities — two innate, four earned through levels and yen. Full details in /abilities.")
@@ -119,8 +117,8 @@ def keeper_card() -> str:
         + f"<i>Open play:</i> your total vs his <code>d6 + {KEEPER_POWER}</code>.\n"
         f"<i>Direct FK:</i> no wall — keeper faces you alone.\n"
         f"<i>Catch {KEEPER_CATCH_ROLL}+</i> — otherwise punched clear.\n"
-        + f"<i>Penalty: corners only, no dice. Read corner → SHO + 0–{PENALTY_NERVE_SPAN} vs "
-        f"PWR + captain MET÷2 + 0–{PENALTY_NERVE_SPAN}; miss his corner → always a goal.</i>"
+        + "<i>Penalty: corners only, no dice. Corner right → always stopped; "
+        "corner wrong → always a goal.</i>"
     )
 
 
@@ -550,7 +548,7 @@ def skill_hint(match_id: int, user_id: int, ab) -> str | None:
     if ab.pass_advance:
         return f"➡️ <b>{esc(ab.name)}</b> ({tag}) — armed: receiver breaks {ab.pass_advance} zone(s), can't be intercepted."
     if ab.pen_edge:
-        return f"🥶 <b>{esc(ab.name)}</b> ({tag}) — armed: +{ab.pen_edge} on the penalty nerve check."
+        return f"🥶 <b>{esc(ab.name)}</b> ({tag}) — armed: pushes the keeper off your penalty corner."
     if ab.tackle_keep:
         return f"🌀 <b>{esc(ab.name)}</b> ({tag}) — armed: tackled → you keep the ball and advance."
     if ab.gk_down:

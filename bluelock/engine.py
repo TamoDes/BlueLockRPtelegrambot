@@ -1128,16 +1128,16 @@ def resolve(match_id: int) -> dict | None:
             db.bump_slot(match_id, stopper["slot"], stops=1)
             new_holder = turnover(stopper["slot"])
     elif action == "penalty":
+        # No dice: the corner call decides it. A read corner is a guaranteed stop,
+        # a missed corner is a guaranteed goal — abilities only push the keeper off
+        # the shooter's corner, they never break the read.
         gk_spot = out["gk_spot"]
         pen_ab = abilities.peek_armed(state, actor["slot"])
-        edge = 0
         autoscore = False
         if pen_ab is not None and (pen_ab.pen_edge or pen_ab.pen_autoscore):
             abilities.spend_armed(state, actor["slot"])
-            edge = 0 if pen_ab.kind == "passive" else pen_ab.pen_edge
-            autoscore = pen_ab.pen_autoscore
-            if autoscore:
-                abilities.note(state, actor["name"], pen_ab, "keeper sent the wrong way")
+            autoscore = True
+            abilities.note(state, actor["name"], pen_ab, "keeper is sent the wrong way")
         if autoscore and gk_spot == out["att_spot"]:
             options = [t for t in PENALTY_TARGETS if t != out["att_spot"]]
             gk_spot = random.choice(options)
@@ -1146,25 +1146,8 @@ def resolve(match_id: int) -> dict | None:
         if out["att_spot"] != gk_spot:
             score_goal()
         else:
-            spotter = out.get("spotter")
-            sho_stat = (
-                max(1, slot_stats(actor)["shot"])
-                + duel.get("pen_edge_passive", 0)
-                + edge
-            )
-            gk_stat = duel["gk_power"]
-            if spotter is not None:
-                gk_stat += max(1, slot_stats(spotter)["meta"]) // 2
-            pen_sho = sho_stat + random.randint(0, PENALTY_NERVE_SPAN)
-            pen_gk = gk_stat + random.randint(0, PENALTY_NERVE_SPAN)
-            out["pen_sho"] = pen_sho
-            out["pen_gk"] = pen_gk
-            if pen_sho >= pen_gk:
-                score_goal()
-                out["nerve"] = "won"
-            else:
-                keeper_restart(catch=True)
-                out["nerve"] = "lost"
+            keeper_restart(catch=True)
+            out["nerve"] = "read"
     elif action in KEEPER_ACTIONS:
         for slot in wall_beaten:
             if slot not in beaten:

@@ -102,7 +102,7 @@ def register_extras() -> None:
     ])
     _register("reo", [
         Ability("reo_p3", "reo", "passive", 3, "Perfect Elite",
-            "+1 to all duels and +1 on penalty nerve checks.",
+            "+1 to all duels; his penalty sends the keeper the wrong way.",
             att=lambda c: 1, pen_edge=1),
         Ability("reo_s3", "reo", "skill", 4, "Copy of the Ace",
             "Copies the opponent's best move: unmarks himself, wins the duel, ties go his way.",
@@ -130,7 +130,7 @@ def register_extras() -> None:
             "+2 Meta Vision defense while marking.",
             dfd=lambda c: 2),
         Ability("karasu_s3", "karasu", "skill", 4, "Crow's Gambit",
-            "+3 on his penalty nerve check.",
+            "+3 — sends the keeper the wrong way on his penalty.",
             pen_edge=3),
     ])
     _register("yukimiya", [
@@ -181,7 +181,7 @@ def register_extras() -> None:
             "Completed passes give receivers +2; +1 Meta Vision defense.",
             pass_buff=2, dfd=lambda c: 1),
         Ability("iemon_s3", "iemon", "skill", 4, "Drilled Perfection",
-            "+3 on his penalty nerve check.",
+            "+3 — sends the keeper the wrong way on his penalty.",
             pen_edge=3),
     ])
     _register("naruhaya", [
@@ -294,7 +294,7 @@ def register_extras() -> None:
             att=lambda c: 1 if _mate("kaiser") else 0,
             dfd=lambda c: 1 if _mate("kaiser") else 0),
         Ability("ness_s2", "ness", "skill", 3, "Set-Piece Darling",
-            "+2 on his penalty nerve duel.",
+            "+2 — sends the keeper the wrong way on his penalty.",
             pen_edge=2),
         Ability("ness_p3", "ness", "passive", 3, "Emperor\u2019s Shadow",
             "Completed passes give receivers +2; +1 defense on his marks.",
