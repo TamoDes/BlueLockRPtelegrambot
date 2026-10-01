@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 
@@ -62,34 +63,97 @@ def claim(user_id: int, day: int) -> tuple[int, int] | None:
 
 # ------------------------------------------------------------------ quests
 
+# (id, label, target, stat key) — every quest is a threshold on a today-stat, so
+# progress is always derived live from the match history. "win" is handled apart
+# (needs the scoreline, not a SUM).
+#
+# Quests are tuned in two difficulties so a day can mix busywork with a real
+# challenge: EASY quests are reachable in one or two matches, HARD ones demand a
+# good day. Queues below guarantee at least one easy and at least one hard each day.
 QUEST_POOL = [
-    ("play",  "Play a match",         1, lambda s: s["played"]),
-    ("goal",  "Score a goal",         1, lambda s: s["goals"]),
-    ("assist","Make 2 assists",       2, lambda s: s["assists"]),
-    ("stop",  "Make a stop",          1, lambda s: s["stops"]),
-    ("win",   "Win a match",          1, None),
-    ("act",   "Play 5 actions",       5, lambda s: s["actions"]),
+    # --- easy: one match of normal play
+    ("play",     "Play a match",              1,   "played"),
+    ("goal",     "Score a goal",              1,   "goals"),
+    ("stop",     "Make a stop",               1,   "stops"),
+    ("act",      "Play 5 actions",            5,   "actions"),
+    # --- medium: a decent match
+    ("goal2",    "Score 2 goals",             2,   "goals"),
+    ("assist",   "Make 2 assists",            2,   "assists"),
+    ("stop2",    "Make 3 stops",              3,   "stops"),
+    ("act2",     "Play 12 actions",           12,  "actions"),
+    ("assist1",  "Make an assist",            1,   "assists"),
+    # --- hard: a genuinely good day
+    ("goal3",    "Hat-trick (3 goals)",       3,   "goals"),
+    ("assist3",  "Make 4 assists",            4,   "assists"),
+    ("stop3",    "Make 5 stops",              5,   "stops"),
+    ("act3",     "Play 25 actions",           25,  "actions"),
 ]
 
+QUEST_WIN = ("win", "Win a match", 1, None)      # win1/hard twin below
+QUEST_WIN2 = ("win2", "Win 2 matches", 2, None)
+
+QUEST_BY_ID = {q[0]: q for q in QUEST_POOL + [QUEST_WIN, QUEST_WIN2]}
+
+# three fixed queue slots per day: a busywork slot, a form slot, a challenge slot
+QUEST_EASY = ("play", "goal", "stop", "act", "assist1")
+QUEST_MEDIUM = ("goal2", "assist", "stop2", "act2")
+QUEST_HARD = ("goal3", "assist3", "stop3", "act3", "win2", "win")
+
 QUEST_EMOJI = {
-    "play": "⚔️", "goal": "⚽", "assist": "🅰", "stop": "🧱", "win": "🏆", "act": "🎬",
+    "play": "⚔️", "goal": "⚽", "goal2": "🎯", "goal3": "🎩",
+    "assist": "🅰", "assist1": "🅰", "assist3": "🅰",
+    "stop": "🧱", "stop2": "🧱", "stop3": "🧱",
+    "act": "🎬", "act2": "🎬", "act3": "🎬",
+    "win": "🏆", "win2": "🏆",
 }
 
 
+def _draw(day: int, salt: int, span: int) -> int:
+    """Stable pseudo-random draw: same day => same number for everyone, every run.
+
+    Hashed per (day, salt) instead of a rolling LCG so neighbouring days are
+    uncorrelated — a rolling seed made boards repeat within a week.
+    """
+    digest = hashlib.md5(f"{day}:{salt}".encode()).hexdigest()
+    return int(digest[:8], 16) % max(1, span)
+
+
+def _stat_key(qid: str) -> str:
+    """Which today-stat a quest is measured on — win1/win2 share the win counter."""
+    stat = QUEST_BY_ID[qid][3]
+    return stat if stat is not None else "wins"
+
+
+def _build_boards() -> list[tuple[str, str, str]]:
+    """Every legal daily board: one easy + one medium + one hard, all different stats."""
+    combos = []
+    for e in QUEST_EASY:
+        for m in QUEST_MEDIUM:
+            for h in QUEST_HARD:
+                keys = {_stat_key(e), _stat_key(m), _stat_key(h)}
+                if len(keys) == 3:
+                    combos.append((e, m, h))
+    return sorted(combos)
+
+
+QUEST_BOARDS = _build_boards()
+# coprime with the board count => a day-stepped walk visits every board exactly
+# once before repeating, so the board rotates through the whole catalogue.
+BOARD_STEP = 37
+
+
 def pick_quests(day: int) -> list[str]:
-    """Stable 3-quest rotation per day — same picks for everyone, changes daily."""
-    pool = [q[0] for q in QUEST_POOL]
-    seed = (day * 2654435761) % (2**32)
-    out = []
-    remaining = list(pool)
-    for _ in range(QUESTS_PER_DAY):
-        seed = (seed * 1103515245 + 12345) % (2**31)
-        out.append(remaining.pop(seed % len(remaining)))
-    return out
+    """Stable daily board (easy + medium + hard, no repeated stat) for every player."""
+    if not QUEST_BOARDS:
+        return [QUEST_EASY[0], QUEST_MEDIUM[0], QUEST_HARD[0]]
+    return list(QUEST_BOARDS[(day * BOARD_STEP) % len(QUEST_BOARDS)])
 
 
 def quest_def(qid: str) -> tuple[str, str, int, object]:
-    return next(q for q in QUEST_POOL if q[0] == qid)
+    q = QUEST_BY_ID.get(qid)
+    if q is None:
+        raise KeyError(qid)
+    return q
 
 
 def quest_target(qid: str) -> int:
@@ -120,9 +184,10 @@ def day_start_ts(day: int) -> int:
 
 
 def quest_progress(qid: str, stats: dict) -> int:
-    if qid == "win":
+    key = quest_def(qid)[3]
+    if key is None:                      # win-count quests read the scorelines
         return stats["wins"]
-    return quest_def(qid)[3](stats)
+    return int(stats.get(key, 0))
 
 
 def quest_state(user_id: int, day: int) -> dict:

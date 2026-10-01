@@ -36,6 +36,7 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
     sandbox = test_mode()
     rate = 0.0 if sandbox else 1.0
     xp_rate = 0.0 if sandbox else 1.0
+    motm_bonus = 0 if sandbox else MOTM_VALUE
     s1, s2 = match["score1"], match["score2"]
 
     level_ups = []
@@ -69,7 +70,7 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
 
     for r, payout, gained_xp, score in enriched:
         is_motm = motm_row is not None and r["slot"] == motm_row[0]["slot"]
-        bonus = MOTM_VALUE if is_motm else 0
+        bonus = motm_bonus if is_motm else 0
 
         before = db.player(r["user_id"])
         old_level = level_for(before["xp"]) if before else 1
@@ -78,7 +79,9 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
         if new_level > old_level:
             payout += 0 if sandbox else LEVEL_UP_BONUS * (new_level - old_level)
             level_ups.append((r["user_id"], old_level, new_level))
-        db.add_yen(r["user_id"], payout + bonus, f"match #{match_id}")
+        credit = payout + bonus
+        if credit:                      # a test season credits nothing at all
+            db.add_yen(r["user_id"], credit, f"match #{match_id}")
 
     new_medals = []
     for r in roster:
@@ -98,7 +101,7 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
     lines = []
     for r, payout, gained_xp, score in enriched:
         is_motm = motm_row is not None and r["slot"] == motm_row[0]["slot"]
-        total_in = payout + (MOTM_VALUE if is_motm else 0)
+        total_in = payout + (motm_bonus if is_motm else 0)
         detail = []
         if r["goals"]:
             detail.append(f"{r['goals']} goal{'s' if r['goals'] > 1 else ''}")
@@ -125,8 +128,8 @@ def settle(match_id: int) -> tuple[str, list[tuple[int, int, int]]] | None:
         report += f"\n{RULE}\n📻 <b>Last plays</b>\n" + "\n".join(f"• {line}" for line in recap)
     if motm_row is not None:
         report += (
-            f"\n{RULE}\n🌟 <b>MAN OF THE MATCH</b> — <b>{motm_row[0]['name']}</b> "
-            f"(+{yen_short(MOTM_VALUE)} bonus)"
+            f"\n{RULE}\n🌟 <b>MAN OF THE MATCH</b> — <b>{motm_row[0]['name']}</b>"
+            + (f" (+{yen_short(MOTM_VALUE)} bonus)" if motm_bonus else "")
         )
     if level_ups:
         report += f"\n📈 Level-up bonus × {len(level_ups)}"

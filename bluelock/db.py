@@ -325,11 +325,6 @@ def set_display(user_id: int, name: str) -> bool:
 
 
 def add_yen(user_id: int, amount: int, reason: str) -> int:
-    from .config import test_mode
-
-    if test_mode() and amount > 0:
-        row = q1("SELECT yen FROM players WHERE user_id=?", (user_id,))
-        return row["yen"] if row else 0
     with tx() as c:
         c.execute("UPDATE players SET yen = yen + ? WHERE user_id=?", (amount, user_id))
         c.execute(
@@ -341,10 +336,6 @@ def add_yen(user_id: int, amount: int, reason: str) -> int:
 
 
 def spend_yen(user_id: int, amount: int, reason: str) -> bool:
-    from .config import test_mode
-
-    if test_mode():
-        return True
     with tx() as c:
         row = c.execute("SELECT yen FROM players WHERE user_id=?", (user_id,)).fetchone()
         if not row or row["yen"] < amount:

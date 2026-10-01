@@ -95,7 +95,7 @@ def hub_panel(ctx: int, page: int):
     text = (
         "🛠 <b>ADMIN PANEL</b>\n" + RULE + "\n"
         f"🗓 Season <b>{cfg.SEASON}</b> · {cfg.phase_label(phase)}\n"
-        + (f"🧪 <i>Test season — no yen, no xp, everything free.</i>\n" if cfg.is_test_phase(phase) else "")
+        + (f"🧪 <i>Test season — no yen/xp earned; the shop still costs yen.</i>\n" if cfg.is_test_phase(phase) else "")
         + RULE + "\n"
         f"👥 {row['players']} players · 🃏 {row['chars']} chars\n"
         f"💰 Σ{yen_short(row['yen'])} in wallets · {row['unlocks']} unlocks\n"
@@ -1044,8 +1044,10 @@ def seasons_panel(ctx: int, page: int):
         + RULE + "\n"
         + "\n".join(lines) + "\n"
         + RULE + "\n"
-        "<i>🧪 <b>test</b> = sandbox season: no yen, no xp, purchases free, nothing is "
-        "credited. 🏆 <b>live</b> = real season. New seasons start in test.</i>"
+        "<i>🧪 <b>test</b> = sandbox season: matches, daily and quests pay no yen or xp. "
+        "The shop, training and unlocks still cost real yen — hand some out from the "
+        "panel if you need to test a purchase. 🏆 <b>live</b> = real season. "
+        "New seasons start in test.</i>"
     )
     kb = types.InlineKeyboardMarkup(row_width=1)
     other = "live" if phase == "test" else "test"
@@ -1066,8 +1068,8 @@ def act_sphase(call, ctx):
     db.set_season_phase(cfg.SEASON, other)
     db.set_setting(cfg.SEASON_PHASE_KEY, other)
     if other == "live":
-        return True, "🏆 Season is LIVE — payouts and prices are real now."
-    return True, "🧪 Season is TEST — no yen, no xp, everything free."
+        return True, "🏆 Season is LIVE — payouts are real now."
+    return True, "🧪 Season is TEST — nothing is earned (the shop still costs yen)."
 
 
 @reg("snewask")

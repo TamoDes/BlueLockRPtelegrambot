@@ -1158,6 +1158,46 @@ print("ok  titles page: equipped title marked, presets wired, back works")
 
 config.ABILITIES_ENABLED = False
 
+# ------------------------------------------------------------------ quest variety
+board = economy.pick_quests(economy.local_day())
+assert len(board) == 3 and len(set(board)) == 3, board
+assert all(economy.quest_def(q)[3] is not None or q.startswith("win") for q in board), board
+_stats = {economy.quest_def(q)[3] for q in board if economy.quest_def(q)[3]}
+assert len(_stats) == len([q for q in board if economy.quest_def(q)[3]]), f"two quests share a stat: {board}"
+_tag = [next(n for n, ids in (("easy", economy.QUEST_EASY), ("mid", economy.QUEST_MEDIUM), ("hard", economy.QUEST_HARD)) if q in ids) for q in board]
+assert sorted(_tag) == ["easy", "hard", "mid"], f"a day must mix difficulties: {board}"
+# rotation: over a season every quest shows up and no board repeats a stat
+_seen, _boards = set(), []
+_cycle = len(economy.QUEST_BOARDS)
+for _d in range(20261001, 20261001 + _cycle):
+    _b = economy.pick_quests(_d)
+    _boards.append(tuple(_b))
+    _seen.update(_b)
+    assert len(set(_b)) == 3
+    _st = [economy.quest_def(q)[3] for q in _b if economy.quest_def(q)[3]]
+    assert len(_st) == len(set(_st)), _b
+assert len(_seen) == len(economy.QUEST_BY_ID), f"unused quests: {set(economy.QUEST_BY_ID) - _seen}"
+assert len(set(_boards)) == _cycle, f"a full cycle must be repeat-free ({len(set(_boards))}/{_cycle})"
+# and the cycle must close: day N+cycle shows day N's board again
+assert economy.pick_quests(20261001) == economy.pick_quests(20261001 + _cycle)
+assert _cycle > 40, f"too few legal boards: {_cycle}"
+print(f"ok  quest catalogue: {len(economy.QUEST_BY_ID)} quests, {_cycle} legal daily boards, cycle repeats only after {_cycle} days")
+# progress reads live stats for both sum-quests and win-quests
+_fake = {"played": 2, "goals": 3, "assists": 4, "stops": 5, "actions": 25, "wins": 2}
+assert economy.quest_progress("goal3", _fake) == 3
+assert economy.quest_progress("win2", _fake) == 2
+assert economy.quest_progress("act3", _fake) == 25
+assert economy.quest_progress("play", _fake) == 2
+for _q in economy.QUEST_BY_ID:
+    assert isinstance(economy.quest_def(_q)[1], str) and economy.quest_target(_q) >= 1
+    assert _q in economy.QUEST_EMOJI, f"missing emoji for {_q}"
+print("ok  quests: 15-quest pool, daily easy/mid/hard board, no repeated stat, all reachable")
+
+# 30-day summary renders every quest line
+_sum = economy.quests_summary(101, economy.local_day())
+assert _sum.count("\n") == 2, _sum
+print("ok  quest board renders three lines")
+
 # ------------------------------------------------------------------ seasons
 db.ensure_season(config.SEASON)
 assert db.season_phase(config.SEASON) in ("test", "live")
@@ -1196,13 +1236,16 @@ ledger = db.q1("SELECT COALESCE(SUM(amount),0) AS n FROM wallet_tx WHERE user_id
 assert ledger == 0, "test season must not touch the wallet ledger"
 print("ok  test season: match pays 0 yen / 0 xp and still settles")
 
-# test season: purchases are free, daily/quests pay nothing, medals stay locked
-assert db.spend_yen(sandbox_uid, 9_999_999, "sandbox train") is True
-assert db.add_yen(sandbox_uid, 5_000_000, "sandbox grant") == db.player(sandbox_uid)["yen"]
+# test season: the shop still costs yen — no free purchases, no auto earnings
+assert db.spend_yen(sandbox_uid, 1, "sandbox train") is False, "test season must not grant free purchases"
 assert economy.daily_amount(3) == 0
+db.add_yen(sandbox_uid, 2_000_000, "admin grant for testing")
+assert db.player(sandbox_uid)["yen"] == 2_000_000, "admin grants must still work"
+assert db.spend_yen(sandbox_uid, 1_500_000, "train Shot") is True, "paid purchases must work"
+assert db.player(sandbox_uid)["yen"] == 500_000
 db.set_setting(config.SEASON_PHASE_KEY, "live")
 assert economy.daily_amount(3) > 0
-print("ok  test season: purchases free, no earnings, medals skipped")
+print("ok  test season: shop still costs yen, no auto earnings, medals skipped")
 
 # season panel renders + switching phase is persisted
 from bluelock import handlers_admin  # noqa: F401
@@ -1215,8 +1258,6 @@ print("ok  admin seasons panel: phase + new-season buttons wired")
 
 # new season wipes postable state but keeps characters
 def _wipe_probe():
-    db.set_setting(config.SEASON_PHASE_KEY, "test")
-    keeper = db.player(sandbox_uid)["yen"]
     db.add_yen(sandbox_uid, 1_000_000, "pre-wipe")
     db.bump_boost(sandbox_uid, "shot", 2)
     db.set_title(sandbox_uid, "Wiped")
@@ -1225,7 +1266,6 @@ def _wipe_probe():
     assert row["yen"] == 0 and row["xp"] == 0 and row["title"] in (None, ""), dict(row)
     assert db.owned_by(sandbox_uid) is not None, "characters must survive a wipe"
     assert json.loads(db.owned_by(sandbox_uid)["boosts"]) == {}, "boosts reset"
-    return keeper
 
 _wipe_probe()
 print("ok  new season: yen/xp/boosts/titles wiped, characters kept")
