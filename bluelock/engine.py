@@ -461,8 +461,10 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             abilities.spend_armed(state, actor["slot"])
             _stash_goal(armed)
             if duel.get("defender") is not None:
-                # three dice, one of them called real — the defender must name it
-                duel["bluff"] = {"real": random.randint(1, 3),
+                # three dice — HUGO decides which one is real; the defender
+                # only sees the question, never the answer.
+                duel["bluff"] = {"real": None,
+                                 "setter": actor["slot"],
                                  "picker": duel["defender"],
                                  "src": armed.name, "aid": armed.id}
             else:
@@ -706,8 +708,13 @@ def _roles(duel: dict) -> list[tuple[str, str, int | None]]:
         return []
     roles = []
     _bl = duel.get("bluff")
-    if _bl and duel.get("bluff_pick") is None and _bl.get("picker") is not None:
-        roles.append(("bluff", "bluff_pick", _bl["picker"]))
+    if _bl:
+        # Hugo calls which die is real (kept off every broadcast), then the
+        # defender has to name it. _next_role fills them in this order.
+        if _bl.get("setter") is not None:
+            roles.append(("bluff_set", "bluff_real", _bl["setter"]))
+        if _bl.get("picker") is not None:
+            roles.append(("bluff", "bluff_pick", _bl["picker"]))
     roles.append(("att", "att_die", duel["actor"]))
     wall = duel.get("wall") or []
     if duel["action"] == "shoot" and not duel.get("gamble"):
@@ -770,6 +777,8 @@ def awaiting(match) -> dict | None:
     out = {"role": role, "slot": slot, "name": row["name"], "user_id": row["user_id"], "duel": duel}
     if role in ("spot", "spot_gk"):
         out["label"] = "Pick your corner" if role == "spot" else "Call the keeper's dive"
+    if role == "bluff_set":
+        out["label"] = "Pick the die you'll call real"
     if role == "bluff":
         out["label"] = "Which die did he call real?"
     return out
@@ -825,6 +834,14 @@ def submit_spot(match_id: int, user_id: int, target: str) -> dict:
     return _claim(match_id, user_id, target, ("spot", "spot_gk"))
 
 
+def submit_bluff_set(match_id: int, user_id: int, pick: int) -> dict:
+    """Hugo picks which of his three dice is the real one. It is never echoed
+    back into the chat — only the defender's guess is shown."""
+    if pick not in (1, 2, 3):
+        return {"status": "invalid"}
+    return _claim(match_id, user_id, pick, ("bluff_set",))
+
+
 def submit_bluff(match_id: int, user_id: int, pick: int) -> dict:
     """Hugo's Phantom Call: the defender names which of the three dice is real.
     Call it right and the duel runs normally; call it wrong and there is no
@@ -841,7 +858,7 @@ def submit_bluff(match_id: int, user_id: int, pick: int) -> dict:
         state = json.loads(row["pending"] or "{}")
         duel = state.get("duel") or {}
         bl = duel.get("bluff") or {}
-        if bl and duel.get("bluff_pick") is not None and duel["bluff_pick"] != bl.get("real"):
+        if bl and duel.get("bluff_pick") is not None and duel["bluff_pick"] != duel.get("bluff_real"):
             duel["auto"] = {"t": "win", "slot": duel.get("actor"),
                             "aid": bl.get("aid"), "src": bl.get("src"),
                             "bluff_miss": True}
@@ -1111,6 +1128,7 @@ def resolve(match_id: int) -> dict | None:
     def score_goal() -> None:
         nonlocal new_holder
         out["outcome"] = "goal"
+        state.pop("loose_claim_slot", None)   # that read expires at the next goal
         # Taha's duration rules: every goal reward expires at the NEXT goal;
         # a mid-match streak expires when its own holder scores.
         state["streaks"] = [
@@ -1202,7 +1220,7 @@ def resolve(match_id: int) -> dict | None:
         pup["stage"] = "done"
 
     def keeper_restart(catch: bool) -> None:
-        nonlocal new_holder
+        nonlocal new_holder, actor
         out["outcome"] = "saved"
         out["keeper_dist"] = "catch" if catch else "punch"
         receiver = None
@@ -1225,7 +1243,34 @@ def resolve(match_id: int) -> dict | None:
             mates = [r for r in roster if r["team"] == defender_team(actor)]
             receiver = random.choice(mates) if mates else actor
         if receiver is None:
-            receiver = loose_ball_to(roster, actor, beaten)
+            # A ball nobody held: a passive tuned to loose balls beats the coin
+            # flip — Barou comes and takes it, Sae comes and finishes it.
+            claimed = None
+            lab = None
+            for r in roster:
+                if r["team"] != actor["team"]:
+                    continue
+                _lb = abilities.peek_armed(state, r["slot"])
+                if _lb is not None and _lb.on_ball_loose:
+                    abilities.spend_armed(state, r["slot"])
+                    claimed = r
+                    lab = _lb
+                    abilities.note(state, r["name"], _lb, "reads the loose ball",
+                                   icon=abilities.icon_for(_lb))
+                    break
+            if claimed is not None:
+                receiver = claimed
+                state["loose_claim_slot"] = claimed["slot"]
+                if lab.finish_loose:
+                    out["receiver"] = claimed
+                    out["loose_finish"] = True
+                    _shooter = actor
+                    actor = claimed          # credit the finish, not the shooter
+                    score_goal()
+                    actor = _shooter
+                    return
+            else:
+                receiver = loose_ball_to(roster, actor, beaten)
         out["receiver"] = receiver
         new_holder = turnover(receiver["slot"])
 

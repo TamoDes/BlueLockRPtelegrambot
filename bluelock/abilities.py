@@ -98,6 +98,8 @@ class PassiveDef:
     requires_teammate_in_front: bool = False  # only fires if teammate is ahead in attack direction
     on_my_turn_start: bool = False    # fires at start of actor's turn (on_pos trigger)
     on_ball_loose: bool = False        # fires when ball becomes loose
+    # Sae: he doesn't just collect the loose ball, he finishes it outright.
+    finish_loose: bool = False
     on_pass_incoming: bool = False     # fires when a pass toward actor is in-flight
     on_teammate_approaching: bool = False  # fires when teammate with ball is nearby
     on_defender_guess: bool = False    # fires when defender is about to guess
@@ -161,6 +163,12 @@ class Ability:
     # he scored, the scorer when he assisted).
     goal_self: int = 0
     goal_mate: int = 0
+    # A keeper who does not hold on to it: whoever owns this comes for the loose
+    # ball instead of the coin flip (Taha: "لوز شد ... میاد").
+    on_ball_loose: bool = False
+    # ...and this one finishes it outright instead of just collecting it
+    # ("گل گارانتی میزنه").
+    finish_loose: bool = False
     aura_gk: int = 0
     gamble: bool = False
     gamble_min: int = 0
@@ -335,6 +343,12 @@ def _after_pass(c):
     return c["last_pass"] is not None
 
 
+def _just_loose(c):
+    """He came and picked up a loose ball himself — Barou arrives either way."""
+    return (c.get("loose") is not None and c.get("self") is not None
+            and c["loose"] == c["self"]["slot"])
+
+
 def _unmarked(c):
     return c["unmarked"]
 
@@ -425,7 +439,7 @@ _KITS = [
             "+2 on his pass; the receiver's next action +2. If a goal follows, "
             "Sae and the scorer each take +1.",
             att=lambda c: 2 if c["action"] == "pass" else 0, pass_buff=2,
-            goal_self=1, goal_mate=1,
+            goal_self=1, goal_mate=1, on_ball_loose=True, finish_loose=True,
             when=lambda c: c["action"] == "pass")),
         _reg(Ability("sae_s1", "sae", "skill", 1, "Maestro's Through Ball",
             "Completed pass gives the receiver +2 next action.",
@@ -486,9 +500,10 @@ _KITS = [
     # ---------------------------------------------------------------- SR
     ("barou", [
         _reg(Ability("barou_p1", "barou", "passive", 1, "Hungry G Point",
-            "+2 Shot right after receiving a pass; +1 more if it goes in.",
-            att=lambda c: 2 if c["action"] == "shoot" and _after_pass(c) else 0,
-            goal_self=1)),
+            "+2 Shot right after receiving a pass or picking up a loose ball; "
+            "+1 more if it goes in.",
+            att=lambda c: 2 if c["action"] == "shoot" and (_after_pass(c) or _just_loose(c)) else 0,
+            on_ball_loose=True, goal_self=1)),
         _reg(Ability("barou_s1", "barou", "skill", 1, "Predator Tackle",
             "While marking: wins the ball with no roll.",
             auto="stop")),
@@ -1025,6 +1040,7 @@ def build_ctx(match, roster, self_row, other_row, action: str, zone: int, state:
         "beaten_n": len(beaten),
         "unmarked": other_row is None,
         "last_pass": state.get("last_pass"),
+        "loose": state.get("loose_claim_slot"),
         "self": self_row,
         "other": other_row,
         "roster": roster,

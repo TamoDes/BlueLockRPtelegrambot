@@ -283,6 +283,16 @@ def bluff_keyboard(match_id: int) -> types.InlineKeyboardMarkup:
     return kb
 
 
+def bluff_set_keyboard(match_id: int) -> types.InlineKeyboardMarkup:
+    """Hugo's own pick — the answer is never printed anywhere."""
+    kb = types.InlineKeyboardMarkup(row_width=3)
+    kb.add(*[
+        types.InlineKeyboardButton(f"🎲 Die {n}", callback_data=f"bluffset|{match_id}|{n}")
+        for n in (1, 2, 3)
+    ])
+    return kb
+
+
 def prompt_dice(match_id: int) -> None:
     match = db.match(match_id)
     if not match or match["phase"] != "duel":
@@ -305,6 +315,17 @@ def prompt_dice(match_id: int) -> None:
                 chat_id,
                 f"🎯 <b>{who}</b> — {label}!{suffix}",
                 reply_markup=spot_keyboard(match_id, role),
+            )
+        return
+
+    if role == "bluff_set":
+        for chat_id in broadcast_targets(match):
+            safe(
+                bot.send_message,
+                chat_id,
+                f"🃏 <b>{who}</b> — you threw three dice. Call one of them real "
+                f"(the answer stays with you).",
+                reply_markup=bluff_set_keyboard(match_id),
             )
         return
 
@@ -474,6 +495,31 @@ def advance_cb(call):
         stamp_pending_turn(match, engine.pending_of(match))
         render_match(match_id)
     safe(bot.answer_callback_query, call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("bluffset|"))
+def bluff_set_cb(call):
+    seen(call)
+    parts = call.data.split("|")
+    if len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) not in (1, 2, 3):
+        safe(bot.answer_callback_query, call.id)
+        return
+    match_id = int(parts[1])
+    result = engine.submit_bluff_set(match_id, call.from_user.id, int(parts[2]))
+    if result["status"] == "wrong":
+        safe(bot.answer_callback_query, call.id, f"That's {result['name']}'s call.", show_alert=True)
+        return
+    if result["status"] != "ok":
+        safe(bot.answer_callback_query, call.id)
+        return
+    # never echo which die — the whole point is that only he knows
+    safe(bot.answer_callback_query, call.id, "✅ Called")
+    broadcast(
+        db.match(match_id),
+        f"🃏 <b>{esc(result['name'])}</b> locked in a die",
+        skip=call.message.chat.id if call.message else None,
+    )
+    advance(match_id)
 
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("bluff|"))

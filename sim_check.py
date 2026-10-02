@@ -1496,7 +1496,7 @@ assert len(st2.get("beaten", [])) >= _nop, (st2.get("beaten"), "of", _nop)
 print("ok  Dance: high die walks past the whole defence",
       len(st2.get("beaten", [])), "/", _nop)
 
-# S22: Hugo's Phantom Pass/Shot — three dice, one of them called real.
+# S22: Hugo's Phantom Pass/Shot — HUGO picks which die is real, then it is guessed.
 hugo_u = make_user("hugo")
 mH = build_match([(hugo_u, def_u), (isagi_u, def_u2)])
 sH = slot_of(mH, hugo_u)
@@ -1504,9 +1504,11 @@ stage(mH, sH, zone=1)
 do_arm(mH, sH, "hugo_p1")
 engine.open_duel(mH, "pass", slot_of(mH, isagi_u))
 pH = engine.awaiting(db.match(mH))
+assert pH and pH["role"] == "bluff_set" and pH["user_id"] == hugo_u, pH
+assert engine.submit_bluff_set(mH, hugo_u, 2)["status"] == "ok"   # he calls die 2
+pH = engine.awaiting(db.match(mH))
 assert pH and pH["role"] == "bluff", pH
-real = engine.pending_of(db.match(mH))["duel"]["bluff"]["real"]
-assert engine.submit_bluff(mH, pH["user_id"], 1 if real != 1 else 2)["status"] == "ok"
+assert engine.submit_bluff(mH, pH["user_id"], 1)["status"] == "ok"  # defender misses
 assert engine.ready(db.match(mH)), "a wrong call ends the contest"
 out = engine.resolve(mH)
 assert out["outcome"] == "pass_ok", out
@@ -1518,8 +1520,9 @@ stage(mH2, sH2, zone=1)
 do_arm(mH2, sH2, "hugo_p1")
 engine.open_duel(mH2, "pass", slot_of(mH2, isagi_u))
 pH2 = engine.awaiting(db.match(mH2))
-real2 = engine.pending_of(db.match(mH2))["duel"]["bluff"]["real"]
-assert engine.submit_bluff(mH2, pH2["user_id"], real2)["status"] == "ok"
+assert engine.submit_bluff_set(mH2, hugo_u, 3)["status"] == "ok"   # he calls die 3
+pH2 = engine.awaiting(db.match(mH2))
+assert engine.submit_bluff(mH2, pH2["user_id"], 3)["status"] == "ok"  # defender reads him
 assert not engine.ready(db.match(mH2)), "the contest still needs its dice"
 out = roll_and_resolve(mH2, att=1, dfn=6)
 assert out["outcome"] != "pass_ok", out   # a right call really can cost him
@@ -1539,5 +1542,24 @@ assert out["outcome"] == "goal", out
 assert out.get("sure_goal"), out
 print("ok  Last Puzzle: a die-1 shot past a die-6 keeper still goes in")
 
+# S24: keeper spills it — a passive tuned to the loose ball beats the coin flip
+sae_u = fresh  # the sae owner the suite already made
+# the wall has to be beatable AND the keeper still able to spill one, so the
+# other keeper is a low-meta man (charles) — wanima alone would do it too.
+def_s24 = new_users["charles"]  # the suite already made this one
+mL = build_match([(sae_u, def_u), (isagi_u, def_s24)])
+sL_sae = slot_of(mL, sae_u)
+sL_isa = slot_of(mL, isagi_u)
+for _x in abilities.starter_ids("sae"): db.grant_unlock(sae_u, _x)
+stage(mL, sL_isa, zone=1)
+do_arm(mL, sL_sae, "sae_p1")
+engine.open_duel(mL, "shoot", None)
+assert "sae_p1" not in engine.pending_of(db.match(mL)).get("used", [])
+out = roll_and_resolve(mL, att=1, dfn=1, gk=3)   # past the wall, saved, spilled (< 4)
+assert out["outcome"] == "goal", out
+assert out.get("loose_finish"), out
+st = engine.pending_of(db.match(mL))
+assert "sae_p1" in st.get("used", []), "the loose-ball finish burns the charge"
+print("ok  loose finish: the keeper spills it and Sae walks it in for a sure goal")
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")
