@@ -324,6 +324,19 @@ def _gated(ab, ctx) -> bool:
         return False
 
 
+def grant_streak(state: dict, receiver_slot: int, amount: int, src_id: str,
+                 kind: str = "streak", scope: str | None = None) -> None:
+    """Taha's duration rules for persistent buffs.
+    kind='streak' → granted mid-match; lives until THAT holder scores.
+    kind='reward' → granted on a goal; lives until the next goal (any side).
+    scope=None applies to every action, otherwise only the named action.
+    Unlike state['buffs'] these survive turnovers."""
+    state.setdefault("streaks", []).append(
+        {"slot": receiver_slot, "amt": amount, "src": src_id,
+         "kind": kind, "scope": scope}
+    )
+
+
 def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
     match = db.match(match_id)
     roster = db.roster(match_id)
@@ -472,10 +485,25 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             kept_buffs.append(b)
     state["buffs"] = kept_buffs
 
+    # persistent streaks — survive turnovers, filtered by scope
+    for b in state.get("streaks", []):
+        if b.get("slot") == actor["slot"] and (b.get("scope") in (None, action)):
+            _sab = abilities.get(b.get("src", ""))
+            duel["att_power"] += b["amt"]
+            duel["att_boosts"].append((_sab.name if _sab else "streak", b["amt"]))
+            if _sab:
+                abilities.note(state, actor["name"], _sab, f"streak +{b['amt']}", icon="\U0001f525")
+
     # --- defender: armed defensive skill/passive -------------------------------
     def _defender_arms(row, power_key: str, boost_key: str, floor_key: str) -> None:
         """Apply the row's armed defensive ability to the current duel stage."""
         ctx_def = abilities.build_ctx(match, roster, row, actor, action, zone, state)
+        # persistent streaks — survive turnovers, filtered by scope
+        for b in state.get("streaks", []):
+            if b.get("slot") == row["slot"] and (b.get("scope") in (None, action)):
+                _sab = abilities.get(b.get("src", ""))
+                duel[power_key] += b["amt"]
+                duel[boost_key].append((_sab.name if _sab else "streak", b["amt"]))
         if str(row["slot"]) not in state.get("armed", {}):
             for _ab in abilities.kit_of(kits, row):
                 if (
@@ -985,6 +1013,12 @@ def resolve(match_id: int) -> dict | None:
     def score_goal() -> None:
         nonlocal new_holder
         out["outcome"] = "goal"
+        # Taha's duration rules: every goal reward expires at the NEXT goal;
+        # a mid-match streak expires when its own holder scores.
+        state["streaks"] = [
+            s for s in state.get("streaks", [])
+            if s.get("kind") != "reward" and s.get("slot") != actor["slot"]
+        ]
         db.bump_slot(match_id, actor["slot"], goals=1)
         assist_slot = state.get("last_pass")
         if assist_slot is not None and assist_slot != actor["slot"]:

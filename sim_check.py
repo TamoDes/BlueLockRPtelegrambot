@@ -1287,6 +1287,52 @@ def _wipe_probe():
 _wipe_probe()
 print("ok  new season: yen/xp/boosts/titles wiped, characters kept")
 
+# S15: persistent streak buffs — Taha's duration rules
+# (a) rides the duel math and respects the action scope
+mS = build_match([(rin_u, def_u), (isagi_u, def_u2)])
+ss = slot_of(mS, rin_u)
+dri = characters.base_stats("rin")["dribble"]
+restage(mS, ss, zone=0)
+st = engine.pending_of(db.match(mS))
+st.setdefault("streaks", []).extend([
+    {"slot": ss, "amt": 3, "src": "rin_p2", "kind": "streak", "scope": None},
+    {"slot": ss, "amt": 5, "src": "rin_s1", "kind": "streak", "scope": "shoot"},
+])
+db.update_match(mS, pending=json.dumps(st))
+opened = engine.open_duel(mS, "dribble", None)
+assert opened["duel"]["att_power"] == dri + 3, (
+    "streak rides the duel math, scope filtered", opened["duel"]["att_power"])
+assert ("Bloodline Rivalry", 3) in opened["duel"]["att_boosts"], opened["duel"]["att_boosts"]
+engine.cancel_duel(mS)
+
+# (b) goal expiry: scorer's streak dies, rewards die at the NEXT goal,
+#     other streaks survive the goal's turnover
+gA = make_user("barou")
+gB = make_user("lavinho")
+mG = build_match([(gA, gB)])
+gs = slot_of(mG, gA)
+gk_slot = slot_of(mG, gB)
+stage(mG, gs, set_piece="penalty", zone=ZONE_BOX)
+st = engine.pending_of(db.match(mG))
+st.setdefault("streaks", []).extend([
+    {"slot": gs, "amt": 3, "src": "barou_p1", "kind": "streak", "scope": None},
+    {"slot": gk_slot, "amt": 4, "src": "lavinho_p1", "kind": "streak", "scope": None},
+    {"slot": gk_slot, "amt": 2, "src": "lavinho_s1", "kind": "reward", "scope": None},
+])
+db.update_match(mG, pending=json.dumps(st))
+engine.open_duel(mG, "penalty", None)
+assert engine.submit_spot(mG, gA, "left")["status"] == "ok"
+assert engine.submit_spot(mG, gB, "right")["status"] == "ok"
+out = engine.resolve(mG)
+assert out["outcome"] == "goal", out
+st = engine.pending_of(db.match(mG))
+kinds = {(s["slot"], s["kind"]) for s in st.get("streaks", [])}
+assert (gs, "streak") not in kinds, "scorer's mid-match streak dies when he scores"
+assert (gk_slot, "streak") in kinds, "other streaks survive the goal/turnover"
+assert (gk_slot, "reward") not in kinds, "goal rewards expire at the very next goal"
+assert st.get("buffs") == [], "one-shot buffs are wiped by the turnover"
+print("ok  streak/reward buffs: math+scope, goal-rule expiry, survive turnovers")
+
 db.set_setting(config.SEASON_PHASE_KEY, "live")
 
 print("\nABILITY SUITE PASSED")
