@@ -332,8 +332,9 @@ def register_extras() -> None:
     ])
     _register("knight", [
         Ability("knight_p1", "knight", "passive", 1, "Knight Defense / Knight Sword",
-            "+2 when he defends against a dribble.",
-            dfd=lambda c: 2 if c["action"] == "dribble" else 0),
+            "+2 defending against a dribble; +1 on his dribble, +2 on his shot.",
+            dfd=lambda c: 2 if c["action"] == "dribble" else 0,
+            att=lambda c: 1 if c["action"] == "dribble" else (2 if c["action"] == "shoot" else 0)),
         Ability("knight_s1", "knight", "skill", 1, "Complete Striker",
             "Beats his marker with no roll and lands one zone forward.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble"),

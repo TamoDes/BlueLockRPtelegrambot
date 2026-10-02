@@ -394,8 +394,9 @@ _KITS = [
     ]),
     ("sae", [
         _reg(Ability("sae_p1", "sae", "passive", 1, "Winning Movement",
-            "Completed pass: receiver's next action +2.",
-            pass_buff=2, when=lambda c: c["action"] == "pass")),
+            "+2 on his pass; the receiver's next action +2.",
+            att=lambda c: 2 if c["action"] == "pass" else 0, pass_buff=2,
+            when=lambda c: c["action"] == "pass")),
         _reg(Ability("sae_s1", "sae", "skill", 1, "Maestro's Through Ball",
             "Completed pass gives the receiver +2 next action.",
             pass_buff=2)),
@@ -409,9 +410,9 @@ _KITS = [
     ]),
     ("kaiser", [
         _reg(Ability("kaiser_p1", "kaiser", "passive", 1, "Emperor",
-            "+2 on his shot.",
-            att=lambda c: 2 if c["action"] == "shoot" else 0,
-            when=lambda c: c["action"] == "shoot")),
+            "+1 on his dribble, +2 on his shot.",
+            att=lambda c: 1 if c["action"] == "dribble" else (2 if c["action"] == "shoot" else 0),
+            when=lambda c: c["action"] in ("dribble", "shoot"))),
         _reg(Ability("kaiser_s1", "kaiser", "skill", 1, "Emperor's Draw",
             "Lost field duel → his team wins the set piece.",
             on_lost="foul")),
@@ -786,8 +787,24 @@ from .abilities_roster import register_extras as _register_roster
 _register_roster()
 
 from .abilities_bound import register_extras as _register_bound
-
 _register_bound()
+
+
+# ── Taha's cap: 1 passive + 2 skills per character (+ its bound) ──
+def _trim_kits() -> None:
+    for char, items in BY_CHAR.items():
+        own_passives = [a for a in items if a.kind == "passive" and not a.bound]
+        skills = [a for a in items if a.kind == "skill"]
+        keep = {a.id for a in own_passives[:1] + skills[:2]}
+        keep.update(a.id for a in items if a.bound)
+        if len(keep) != len(items):
+            BY_CHAR[char] = [a for a in items if a.id in keep]
+            st = STARTERS.get(char)
+            if st:
+                STARTERS[char] = [a for a in st if a in keep]
+
+
+_trim_kits()
 
 
 CATEGORIES = (

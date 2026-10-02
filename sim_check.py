@@ -641,8 +641,9 @@ def roll_and_resolve(mid: int, att: int | None = None, dfn: int | None = None, g
     return engine.resolve(mid)
 
 
-# S1: passives arm themselves and stack — one charge per match
-rin_u = make_user("rin", unlocks=["rin_p2"])
+# S1: passives arm themselves — one charge per match
+# (cap = 1 passive + 2 skills: Rin's only own passive is Puppet — pass-triggered)
+rin_u = make_user("rin")
 isagi_u = make_user("isagi")
 def_u = make_user("wanima_a")
 def_u2 = make_user("tokimitsu")
@@ -672,20 +673,23 @@ def restage(m: int, slot: int, **kw) -> None:
 
 
 restage(mid, rs, zone=0)
-opened = engine.open_duel(mid, "dribble", None)
-assert opened["duel"]["att_power"] == base_dri + 2, ("passive must arm itself", opened["duel"]["att_power"])
-assert opened["duel"]["att_boosts"] == [("Bloodline Rivalry", 2)], opened["duel"]["att_boosts"]
+mate = slot_of(mid, isagi_u)
+opened = engine.open_duel(mid, "pass", mate)
+assert opened["duel"].get("auto") == {"t": "win", "slot": rs, "aid": "rin_p1"}, (
+    "passive must arm itself", opened["duel"].get("auto"))
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
-assert st["charges"]["rin_p2"] == 0, "one-charge passive: the fired charge is spent"
-assert "rin_p2" in st["used"], "spent passive moves to used"
+assert st["charges"]["rin_p1"] == 0, "one-charge passive: the fired charge is spent"
+assert "rin_p1" in st["used"], "spent passive moves to used"
 
 restage(mid, rs, zone=0)
-opened = engine.open_duel(mid, "dribble", None)
-assert ("Bloodline Rivalry", 2) not in opened["duel"]["att_boosts"], "spent passive must not fire again"
+opened = engine.open_duel(mid, "pass", mate)
+assert not opened["duel"].get("auto"), "spent passive must not fire again"
+assert all(a != "rin_p1" for a, _ in opened["duel"].get("att_boosts", [])), \
+    "spent passive must not boost again"
 engine.cancel_duel(mid)
-assert engine.arm_skill(mid, rin_u, "rin_p2")["status"] == "spent"
-print("ok  passives fire on their own: one charge per match, boosts tagged on the calc line")
+assert engine.arm_skill(mid, rin_u, "rin_p1")["status"] == "spent"
+print("ok  passives fire on their own: one charge per match, tagged on the duel line")
 
 # S2: Last Puzzle (+2 Shot once a defender is beaten) — condition checked at resolution, not blindly.
 isagi_slot = slot_of(mid, isagi_u)
@@ -753,21 +757,22 @@ assert piece == "freekick"
 print("ok  kaiser foul draw armed ->", piece)
 
 # S5: Silent Service passive armed; buff lands and receiver spends it next action
+# (receiver = Rin: his own passive is pass-only, so ONLY the buff shows on the math)
 hiori_u = make_user("hiori")
-mid4 = build_match([(hiori_u, def_u), (kaiser_u, def_u2)])
+mid4 = build_match([(hiori_u, def_u), (rin_u, def_u2)])
 hs = slot_of(mid4, hiori_u)
-ks4 = slot_of(mid4, kaiser_u)
+rs4 = slot_of(mid4, rin_u)
 arm_stage(mid4, hs, "hiori_p1", zone=0)
-engine.open_duel(mid4, "pass", ks4)
+engine.open_duel(mid4, "pass", rs4)
 out = roll_and_resolve(mid4, att=6, dfn=1)
 assert out["outcome"] == "pass_ok"
 buffs = engine.pending_of(db.match(mid4))["buffs"]
-assert buffs and buffs[0]["slot"] == ks4 and buffs[0]["amt"] == 1
+assert buffs and buffs[0]["slot"] == rs4 and buffs[0]["amt"] == 1
 m4 = db.match(mid4)
-assert db.claim_turn(mid4, m4["turn"], ks4)
+assert db.claim_turn(mid4, m4["turn"], rs4)
 opened = engine.open_duel(mid4, "dribble", None)
-kaiser_dri = characters.base_stats("kaiser")["dribble"]
-assert opened["duel"]["att_power"] == kaiser_dri + 1, "buff rides on receiver's action"
+rin_dri = characters.base_stats("rin")["dribble"]
+assert opened["duel"]["att_power"] == rin_dri + 1, "buff rides on receiver's action"
 engine.cancel_duel(mid4)
 print("ok  hiori pass buff grant + consumption")
 
@@ -857,14 +862,14 @@ assert (lv2, lv3, lv4) == (
     config.ABILITY_T2_LEVEL, config.ABILITY_T3_LEVEL, config.ABILITY_T4_LEVEL
 )
 assert cost2 < cost3 < cost4
-assert len(abilities.kit_for_char("isagi")) == 7  # 6 kit + 1 bound passive
+assert len(abilities.kit_for_char("isagi")) == 4  # 3 kit (1 passive + 2 skills) + 1 bound
 fresh = make_user("sae")
 starters = abilities.starter_ids("sae")
 assert abilities.owned_ids(fresh, "sae") == starters
-assert db.grant_unlock(fresh, "sae_p2") is True
-assert db.grant_unlock(fresh, "sae_p2") is False
+assert db.grant_unlock(fresh, "sae_s2") is True
+assert db.grant_unlock(fresh, "sae_s2") is False
 text, kb = views.kit_page(fresh, "sae")
-assert "Winning Movement" in text and "Possession Metronome" in text
+assert "Winning Movement" in text and "Maestro's Through Ball" in text
 assert "button" in text.lower() or "\u26a1" in text
 print("ok  unlock economy + kit page renders")
 
@@ -956,7 +961,7 @@ print("ok  devour the stage: only the first loss is free")
 new_users = {}
 for nk in ("aiku", "charles", "ness", "zantetsu"):
     assert characters.resolve(characters.name_of(nk)) == nk, nk
-    assert len(abilities.kit_for_char(nk)) == 7, nk  # 6 kit + 1 bound passive
+    assert len(abilities.kit_for_char(nk)) == 4, nk  # 3 kit + 1 bound
     n_u = make_user(nk)
     new_users[nk] = n_u
     n_txt, _ = views.kit_page(n_u, nk)
