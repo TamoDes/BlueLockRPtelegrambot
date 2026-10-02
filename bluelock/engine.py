@@ -138,6 +138,9 @@ def legal_actions(match) -> list[str]:
         return ["penalty"]
     if piece == "freekick":
         return ["freekick", "cross"]
+    pup = state.get("puppet")
+    if pup and pup.get("stage") == "await_action":
+        return [pup.get("action") or "dribble"]
     zone = state.get("zone", 0)
     out = ["pass"]
     if zone < ZONE_BOX:
@@ -355,6 +358,10 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
         return {"error": f"You must take the {ACTION_NAME[set_piece]}."}
     if action == "cross" and set_piece != "freekick":
         return {"error": "You can only cross from a free kick."}
+    pup = state.get("puppet")
+    if pup and pup.get("stage") == "await_action" and actor["slot"] == pup.get("mate") \
+            and action != (pup.get("action") or "dribble"):
+        return {"error": "Puppet Pull forces the dribble."}
     if not set_piece:
         if action in SET_PIECES or action == "cross":
             return {"error": "No set piece for you."}
@@ -436,6 +443,8 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             abilities.spend_armed(state, actor["slot"])
             duel["auto"] = {"t": "win", "slot": actor["slot"], "aid": armed.id}
             duel["zone_extra"] = armed.zone_extra
+            if armed.puppet and action == "pass" and duel.get("target") is not None:
+                duel["puppet"] = {"rin": actor["slot"], "mate": duel["target"], "aid": armed.id}
             abilities.note(state, actor["name"], armed, icon=abilities.icon_for(armed))
         elif armed.gamble:
             abilities.spend_armed(state, actor["slot"])
@@ -1026,6 +1035,15 @@ def resolve(match_id: int) -> dict | None:
             if assister is not None and assister["team"] == actor["team"]:
                 db.bump_slot(match_id, assist_slot, assists=1)
                 out["assister"] = assister
+        # PUPPET window: Rin's own goal pays +1 to him and the helper
+        pup = state.get("puppet")
+        if pup and pup.get("stage") == "done" and actor["slot"] == pup.get("rin"):
+            grant_streak(state, actor["slot"], 1, pup.get("aid", "rin_p1"),
+                         kind="reward", scope=None)
+            if assist_slot is not None and assist_slot != actor["slot"]:
+                grant_streak(state, assist_slot, 1, pup.get("aid", "rin_p1"),
+                             kind="reward", scope=None)
+            pup["stage"] = "spent"
         field = "score1" if actor["team"] == 1 else "score2"
         db.update_match(match_id, **{field: match[field] + 1})
         conceded = [r for r in roster if r["team"] != actor["team"]]
@@ -1041,6 +1059,42 @@ def resolve(match_id: int) -> dict | None:
             {"slot": receiver_slot, "amt": amount, "src": ab.id, "from": actor["name"]}
         )
         abilities.note(state, actor["name"], ab, f"receiver +{amount}", icon="✨")
+
+    def puppet_take(next_zone: int, keep_outcome: bool = False) -> None:
+        """Rin's Puppet Pull: after the forced receiver dribble (or straight
+        away when there is no room for it) Rin snatches the ball back —
+        guaranteed, counted like beating a defender — and the confirmed
+        bonuses land as goal-duration streaks."""
+        nonlocal new_holder, kept_possession
+        pup = state.get("puppet")
+        if not pup or pup.get("stage") != "await_action":
+            return
+        rin_row = by_slot.get(pup.get("rin"))
+        if rin_row is None:
+            return
+        if not keep_outcome:
+            out["outcome"] = "dribble_ok"
+        out.pop("set_piece", None)
+        state.pop("set_piece", None)
+        if defender is not None and defender["slot"] not in beaten:
+            beaten.append(defender["slot"])
+            out["beat"] = defender
+        state["zone"] = next_zone
+        state["last_pass"] = None
+        state["chain"] = state.get("chain", 0) + 1
+        new_holder = rin_row["slot"]
+        kept_possession = True
+        grant_streak(state, rin_row["slot"], 2, pup.get("aid", "rin_p1"),
+                     kind="streak", scope="shoot")
+        if pup.get("mate") is not None:
+            grant_streak(state, pup["mate"], 1, pup.get("aid", "rin_p1"),
+                         kind="streak", scope=None)
+        out["puppet_take"] = rin_row
+        _pab = abilities.get(pup.get("aid", ""))
+        if _pab:
+            abilities.note(state, rin_row["name"], _pab,
+                           "Puppet Pull \u2014 takes it back", icon="\U0001f3ad")
+        pup["stage"] = "done"
 
     def keeper_restart(catch: bool) -> None:
         nonlocal new_holder
@@ -1189,6 +1243,16 @@ def resolve(match_id: int) -> dict | None:
             out["walked"] = bool(duel.get("no_dice"))
             state["last_pass"] = actor["slot"]
             new_holder = duel["target"]
+            puppet_mark = duel.get("puppet")
+            if puppet_mark:
+                state["puppet"] = dict(puppet_mark, stage="await_action", action="dribble")
+                if state.get("zone", 0) < ZONE_BOX:
+                    _pab = abilities.get(puppet_mark.get("aid", ""))
+                    if _pab:
+                        abilities.note(state, actor["name"], _pab, "Puppet Pull", icon="\U0001f3ad")
+                else:
+                    # no room for the forced dribble — the pull happens on the spot
+                    puppet_take(state["zone"], keep_outcome=True)
             buff_ab = abilities.peek_armed(state, actor["slot"])
             if buff_ab is not None and buff_ab.pass_buff:
                 abilities.spend_armed(state, actor["slot"])
@@ -1213,6 +1277,11 @@ def resolve(match_id: int) -> dict | None:
             state["last_pass"] = None
         state["chain"] = state.get("chain", 0) + 1
         kept_possession = True
+
+    # --- PUPPET: the forced dribble resolved — Rin takes it back, guaranteed
+    if action == "dribble" and state.get("puppet", {}).get("stage") == "await_action" \
+            and actor["slot"] == state["puppet"].get("mate"):
+        puppet_take(min(ZONE_BOX, zone + 1))
 
     state["beaten"] = beaten
     out["beaten"] = beaten

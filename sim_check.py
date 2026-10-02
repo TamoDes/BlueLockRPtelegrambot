@@ -1287,7 +1287,9 @@ def _wipe_probe():
 _wipe_probe()
 print("ok  new season: yen/xp/boosts/titles wiped, characters kept")
 
-# S15: persistent streak buffs — Taha's duration rules
+config.ABILITIES_ENABLED = True  # streak/puppet blocks need kits armed
+
+# S15: persistent streak buffs — Taha's goal-duration rules
 # (a) rides the duel math and respects the action scope
 mS = build_match([(rin_u, def_u), (isagi_u, def_u2)])
 ss = slot_of(mS, rin_u)
@@ -1332,6 +1334,39 @@ assert (gk_slot, "streak") in kinds, "other streaks survive the goal/turnover"
 assert (gk_slot, "reward") not in kinds, "goal rewards expire at the very next goal"
 assert st.get("buffs") == [], "one-shot buffs are wiped by the turnover"
 print("ok  streak/reward buffs: math+scope, goal-rule expiry, survive turnovers")
+
+# S16: RIN PUPPET — guaranteed pass → forced receiver dribble → Rin reclaims
+mP = build_match([(rin_u, def_u), (isagi_u, def_u2)])
+ps = slot_of(mP, rin_u)
+ms = slot_of(mP, isagi_u)
+# the season-wipe test above emptied everyone's unlocks — restore the starters
+for _aid in abilities.starter_ids("rin"):
+    db.grant_unlock(rin_u, _aid)
+for _aid in abilities.starter_ids("isagi"):
+    db.grant_unlock(isagi_u, _aid)
+restage(mP, ps, zone=0)
+opened = engine.open_duel(mP, "pass", ms)
+assert opened["duel"].get("auto", {}).get("aid") == "rin_p1", (
+    "puppet pass must be guaranteed", opened["duel"].get("auto"))
+out = roll_and_resolve(mP, att=6, dfn=1)
+assert out["outcome"] == "pass_ok", out
+st = engine.pending_of(db.match(mP))
+assert st.get("puppet", {}).get("stage") == "await_action", st.get("puppet")
+mp_row = db.match(mP)
+assert db.claim_turn(mP, mp_row["turn"], ms) is True
+assert engine.legal_actions(db.match(mP)) == ["dribble"], engine.legal_actions(db.match(mP))
+assert "error" in engine.open_duel(mP, "pass", ps), "Puppet forces the dribble"
+assert "error" not in engine.open_duel(mP, "dribble", None)
+out = roll_and_resolve(mP, att=1, dfn=6)   # losing the duel must not matter
+assert out["outcome"] == "dribble_ok", ("reclaim overrides the result", out.get("outcome"))
+assert out.get("puppet_take") and out["puppet_take"]["slot"] == ps, out.get("puppet_take")
+assert db.match(mP)["holder"] == ps, "Rin owns the ball again"
+st = engine.pending_of(db.match(mP))
+assert st.get("puppet", {}).get("stage") == "done", st.get("puppet")
+streaks = {(s["slot"], s.get("scope"), s["amt"]) for s in st.get("streaks", [])}
+assert (ps, "shoot", 2) in streaks, streaks
+assert (ms, None, 1) in streaks, streaks
+print("ok  Rin PUPPET: guaranteed pass → forced dribble → reclaim + streaks")
 
 db.set_setting(config.SEASON_PHASE_KEY, "live")
 

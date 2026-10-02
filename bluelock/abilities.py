@@ -145,6 +145,7 @@ class Ability:
     long_shot: bool = False
     pass_advance: int = 0
     first_free: bool = False
+    puppet: bool = False
     passive: "PassiveDef | None" = None
     # ── Bound ─────────────────────────────────────────────────────────────────
     # bound=True: this ability only works while the owner's Bound partner is on
@@ -378,8 +379,10 @@ _KITS = [
     ]),
     ("rin", [
         _reg(Ability("rin_p1", "rin", "passive", 1, "Puppet",
-            "Completed pass can't be picked off; receiver's next action +2.",
-            auto="win", pass_buff=2, when=lambda c: c["action"] == "pass")),
+            "Guaranteed pass \u2192 the receiver is forced to dribble \u2192 Rin takes the ball "
+            "back as if he beat a defender (+2 Shoot / receiver +1 until each scores; "
+            "Rin's goal then pays +1 to him and the helper).",
+            auto="win", puppet=True, when=lambda c: c["action"] == "pass")),
         _reg(Ability("rin_s1", "rin", "skill", 1, "Perfect Form",
             "His shot beats the marker with no roll.",
             auto="win", when=lambda c: c["action"] == "shoot")),
