@@ -512,6 +512,9 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                     # he already read the field: nothing between him and goal
                     duel["auto"] = {"t": "win", "slot": actor["slot"], "aid": armed.id}
                     duel["sure_goal"] = True
+                if armed.beat_keeper:
+                    # Dance: the run starts here and ends past the keeper.
+                    state["beat_gk"] = {"slot": actor["slot"], "src": armed.id}
                 if armed.dribble_stack and val:
                     # Monster mode starts on this dribble; every one after it
                     # tops the stack up (Taha: "هر دریبل +۱ موقتی").
@@ -558,6 +561,16 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
         if _mab:
             abilities.note(state, actor["name"], _mab,
                            f"monster stack +{_mon['amt']}", icon="👹")
+
+    # Dance: he danced past the whole defence on his dribble — now the keeper.
+    _bg = state.get("beat_gk")
+    if _bg and _bg.get("slot") == actor["slot"] and action == "shoot":
+        duel["beat_keeper"] = True
+        state.pop("beat_gk", None)
+        _bkg = abilities.get(_bg.get("src", ""))
+        if _bkg:
+            abilities.note(state, actor["name"], _bkg,
+                           "the keeper is just another man to go around", icon="💃")
 
     # Knight Defense: the ball he won came with a bonus attached, and it rides
     # every action of his for as long as he keeps the ball.
@@ -1140,6 +1153,7 @@ def resolve(match_id: int) -> dict | None:
         state.pop("monster", None)   # the stack dies with the goal, like any buff
         # Knight Defense: winning the ball brings the stance bonus with it, and
         # losing it takes the bonus away.
+        state.pop("beat_gk", None)   # the dance ends if the ball changes hands
         _ph = state.pop("pending_hold", None)
         if _ph and _ph.get("slot") == slot:
             state["hold_buff"] = _ph
@@ -1412,6 +1426,10 @@ def resolve(match_id: int) -> dict | None:
         if duel.get("sure_goal"):
             won = True
             out["sure_goal"] = True
+        elif duel.get("beat_keeper"):
+            # Dance ends — he went around the keeper rather than over him.
+            won = True
+            out["beat_keeper"] = True
         if won:
             score_goal()
         else:

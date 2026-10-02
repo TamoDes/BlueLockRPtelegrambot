@@ -1642,5 +1642,36 @@ b = dict(o["duel"]["att_boosts"])
 assert b.get("Knight Defense / Knight Sword") == 2, b
 engine.cancel_duel(mk)
 print("ok  Knight Defense: the bonus rides his possession")
+# S27: Winning Movement — the pass threads straight between two men
+mS = build_match([(fresh, def_u), (isagi_u, def_u2)])
+ss = slot_of(mS, fresh)
+for _x in abilities.starter_ids("sae"): db.grant_unlock(fresh, _x)
+stage(mS, ss, zone=0)
+do_arm(mS, ss, "sae_p1")
+o = engine.open_duel(mS, "pass", slot_of(mS, isagi_u))
+assert o["duel"].get("through") == 2, o["duel"].get("through")
+out = roll_and_resolve(mS, att=6, dfn=1)
+assert out["outcome"] == "pass_ok", out
+print("ok  Winning Movement: the pass threads between two men")
+
+# S28: Dance — the run ends with him going around the keeper
+mL2 = build_match([(gB, def_u), (isagi_u, new_users["charles"])])
+sl = slot_of(mL2, gB)
+for _x in abilities.starter_ids("lavinho"): db.grant_unlock(gB, _x)
+stage(mL2, sl, zone=0)
+do_arm(mL2, sl, "lavinho_p1")
+engine.open_duel(mL2, "dribble", None)
+out = roll_and_resolve(mL2, att=6, dfn=1)
+assert out["outcome"] == "dribble_ok", out
+st = engine.pending_of(db.match(mL2))
+assert "lavinho_p1" in st.get("used", []), "the dribble burns the charge"
+assert st.get("beat_gk"), "the run is still on"
+db.update_match(mL2, pending=json.dumps(st), phase="opening", holder=sl)
+o = engine.open_duel(mL2, "shoot", None)
+assert o["duel"].get("beat_keeper"), sorted(o["duel"].keys())
+out = roll_and_resolve(mL2, att=1, dfn=1, gk=6)   # a die-6 keeper saves this
+assert out["outcome"] == "goal", out
+assert out.get("beat_keeper"), out
+print("ok  Dance: the run ends with him around a die-6 keeper")
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

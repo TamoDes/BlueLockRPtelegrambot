@@ -175,6 +175,9 @@ class Ability:
     # Knight Defense: paid when he wins the ball, rides his possession and dies
     # with it (Taha: "تا زمانی که توپ دستشه").
     hold_bonus: int = 0
+    # Dance: the run he starts on his dribble ends with him walking past the
+    # keeper too (Taha: "حتی میتونه گلر").
+    beat_keeper: bool = False
     aura_gk: int = 0
     gamble: bool = False
     gamble_min: int = 0
@@ -442,9 +445,10 @@ _KITS = [
     ]),
     ("sae", [
         _reg(Ability("sae_p1", "sae", "passive", 1, "Winning Movement",
-            "+2 on his pass; the receiver's next action +2. If a goal follows, "
-            "Sae and the scorer each take +1.",
+            "+2 on his pass straight between two men; the receiver's next "
+            "action +2. If a goal follows, Sae and the scorer each take +1.",
             att=lambda c: 2 if c["action"] == "pass" else 0, pass_buff=2,
+            through=2,
             goal_self=1, goal_mate=1, on_ball_loose=True, finish_loose=True,
             when=lambda c: c["action"] == "pass")),
         _reg(Ability("sae_s1", "sae", "skill", 1, "Maestro's Through Ball",
