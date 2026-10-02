@@ -139,10 +139,15 @@ class Ability:
     pen_autoscore: bool = False
     tie_win: bool = False
     pass_buff: int = 0
-    # Every player the actor shot PAST takes this amount until the next goal.
-    # Applied at the end of resolve() (after any goal the shot scored), so the
+    # Every player the actor beat PAST takes this amount until the next goal.
+    # Applied at the end of resolve() (after any goal he scored), so the
     # debuff survives the goal it was dealt on — Taha: "تا گل بعدی".
     beats: int = 0
+    # "از بین یک الی N نفر": on a SUCCESSFUL move the actor carries past up to
+    # `through` more opponents. The attack die sets how many (capped), so the
+    # count really lands in the 1..N band. Those opponents are marked beaten
+    # alongside the normal marker, so `beats` hits every one of them too.
+    through: int = 0
     # Goal payout (Taha's "اگ گل شد ... میگیره"): stashed when the passive
     # fires, paid at the NEXT goal by the owner's team, then cleared. `self` is
     # for the owner; `mate` for the other party of the move (the assister when
@@ -430,7 +435,7 @@ _KITS = [
             "until the next goal, and a goal pays him +2.",
             att=lambda c: 1 if c["action"] == "dribble" else (2 if c["action"] == "shoot" else 0),
             when=lambda c: c["action"] in ("dribble", "shoot"),
-            beats=-1, goal_self=2)),
+            beats=-1, through=3, goal_self=2)),
         _reg(Ability("kaiser_s1", "kaiser", "skill", 1, "Emperor's Draw",
             "Lost field duel → his team wins the set piece.",
             on_lost="foul")),
@@ -588,9 +593,9 @@ _KITS = [
     ]),
     ("kunigami", [
         _reg(Ability("kunigami_p1", "kunigami", "passive", 1, "Long Shot",
-            "+3 on his shot; +1 more if it goes in.",
+            "+3 on his shot; +1 more if it goes in. Carries past one more defender.",
             att=lambda c: 3 if c["action"] == "shoot" else 0,
-            goal_self=1)),
+            through=2, goal_self=1)),
         _reg(Ability("kunigami_s1", "kunigami", "skill", 1, "Wild Card Volley",
             "Next action of any teammate +2; his own shot +1.",
             pass_buff=2, att=lambda c: 1 if c["action"] == "shoot" else 0)),

@@ -309,7 +309,7 @@ def register_extras() -> None:
             "+2 on his pass; receiver's next action +1. If a goal follows, "
             "Charles and the scorer each take +1.",
             att=lambda c: 2 if c["action"] == "pass" else 0, pass_buff=1,
-            goal_self=1, goal_mate=1),
+            through=2, goal_self=1, goal_mate=1),
         Ability("charles_s1", "charles", "skill", 1, "Switch of Play",
             "Completed pass: receiver breaks two zones.",
             pass_advance=2),

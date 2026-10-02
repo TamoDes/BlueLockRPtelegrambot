@@ -368,9 +368,9 @@ def register_extras() -> None:
     ])
     _register("lavinho", [
         Ability("lavinho_p1", "lavinho", "passive", 1, "Dance",
-            "+3 on his dribble; +2 more if the move ends in a goal.",
+            "+3 on his dribble; walks past the whole defence and +2 if it ends in a goal.",
             att=lambda c: 3 if c["action"] == "dribble" else 0,
-            goal_self=2),
+            through=99, goal_self=2),
         Ability("lavinho_s1", "lavinho", "skill", 1, "Elastica",
             "Beats his marker with no roll and lands one zone forward.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble"),

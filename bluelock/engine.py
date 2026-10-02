@@ -480,10 +480,21 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                     val = bound_bonus(armed, ctx_att, val)
                     duel["att_power"] += val
                     duel["att_boosts"].append((armed.name, val))
-                # resolve() pays out `beats` AFTER the shot is judged (and after
+                # resolve() pays out `beats` AFTER the move is judged (and after
                 # any goal it scored) — stash it so the spent charge still counts.
-                if armed.beats and action == "shoot":
+                if armed.beats and action in ("dribble", "shoot"):
                     state["pending_beats"] = {"amt": armed.beats, "src": armed.id}
+                # "از بین یک الی N نفر": a threaded shot faces at most N of the
+                # wall — he slips past the rest, who are tagged for the `beats`
+                # payout instead of being rolled. A carry/pass picks its count at
+                # resolve() from the attack die (1..N).
+                if armed.through:
+                    if action == "shoot" and duel.get("wall"):
+                        _tw = list(duel["wall"])
+                        duel["wall"] = _tw[:armed.through]
+                        duel["through_extra"] = _tw[armed.through:]
+                    else:
+                        duel["through"] = armed.through
                 # Sae / Charles carry an attack bonus AND a receiver buff. The
                 # bonus lands here and burns the charge, so the receiver buff
                 # would find nothing in resolve() — stash it for the completed pass.
@@ -1005,6 +1016,7 @@ def resolve(match_id: int) -> dict | None:
     if duel.get("ghost_pass") and auto is None:
         cleared = True
     beaten = list(state.get("beaten", []))
+    beaten_before = set(beaten)   # who was already down BEFORE this move
     wall = duel.get("wall") or []
     wall_beaten = []
     if action == "shoot":
@@ -1340,13 +1352,37 @@ def resolve(match_id: int) -> dict | None:
             and actor["slot"] == state["puppet"].get("mate"):
         puppet_take(min(ZONE_BOX, zone + 1))
 
+    # --- "از بین یک الی N نفر" — leftovers of a threaded shot are already tagged
+    # at open_duel; a carry/pass rolls its band NOW (attack die, capped by
+    # `through`) and the extras join `beaten` so the debuff below reaches them.
+    if out.get("outcome") in ("goal", "dribble_ok", "pass_ok"):
+        _take = list(duel.get("through_extra") or [])
+        _cap = int(duel.get("through") or 0)
+        if _cap:
+            _n = max(1, min(int(duel.get("att_die") or 1), _cap))
+            _need = _n if action == "shoot" else _n - 1
+            if _need > 0:
+                _opp = [r["slot"] for r in roster
+                        if r["team"] != actor["team"]
+                        and r["slot"] not in beaten
+                        and r["slot"] not in _take]
+                _take += _opp[:_need]
+        _added = [s for s in _take if s not in beaten]
+        for _s in _added:
+            beaten.append(_s)
+        if _added:
+            out["through_beaten"] = len(_added)
+
     # --- Emperor (Kaiser): everyone he shot past takes -1 until the next goal.
     # Paid out HERE — after any goal the shot just scored — so the debuff is
     # dealt on the goal and survives it (Taha: "تا گل بعدی", any goal clears it).
     pb = state.pop("pending_beats", None)
-    if pb and wall_beaten:
+    if pb:
         _pb_ab = abilities.get(pb.get("src", ""))
-        _targets = [s for s in wall_beaten if s != actor["slot"]]
+        # everyone THIS move put on the floor — wall roll, marker, or the
+        # "از بین N نفر" band. Already-beaten players keep their old tag.
+        _targets = [s for s in beaten
+                    if s not in beaten_before and s != actor["slot"]]
         for _slot in _targets:
             grant_streak(state, _slot, pb["amt"], pb.get("src", ""), kind="reward")
         if _pb_ab and _targets:

@@ -1459,5 +1459,41 @@ assert (sS2, 1, "sae_p1") in paid, ("Sae is owed +1", paid)
 assert (rS2, 1, "sae_p1") in paid, ("the scorer is owed +1", paid)
 print("ok  goal payout spans actions: Sae's pass -> later goal -> both take +1")
 
+# S20: "از بین یک الی ۳ نفر" — the carry walks past several opponents at once,
+# and every one of them eats Emperor's -1.
+mT = build_match([(kaiser_u, def_u), (isagi_u, def_u2)])
+sT = slot_of(mT, kaiser_u)
+for _x in abilities.starter_ids("kaiser"):
+    db.grant_unlock(kaiser_u, _x)
+stage(mT, sT, zone=1)
+do_arm(mT, sT, "kaiser_p1")
+opened = engine.open_duel(mT, "dribble", None)
+assert opened["duel"].get("through") == 3, opened["duel"].get("through")
+out = roll_and_resolve(mT, att=4, dfn=1)
+assert out["outcome"] in ("dribble_ok", "goal"), out
+assert out.get("through_beaten"), out
+st = engine.pending_of(db.match(mT))
+nbeaten = st.get("beaten", [])
+neg = [s for s in st.get("streaks", []) if s.get("amt", 0) < 0]
+assert len(neg) >= len(nbeaten), (neg, nbeaten)
+assert all(n["amt"] == -1 for n in neg), neg
+print("ok  Emperor: carry walks past several -> every beaten player takes -1")
+
+# S21: Lavinho's Dance beats the WHOLE defence (through = 99, die-capped)
+mT2 = build_match([(gB, def_u), (isagi_u, def_u2)])
+sT2 = slot_of(mT2, gB)
+stage(mT2, sT2, zone=1)
+do_arm(mT2, sT2, "lavinho_p1")
+engine.open_duel(mT2, "dribble", None)
+out = roll_and_resolve(mT2, att=6, dfn=1)
+assert out["outcome"] in ("dribble_ok", "goal"), out
+st2 = engine.pending_of(db.match(mT2))
+_ro = db.roster(mT2)
+_kt = next(r_["team"] for r_ in _ro if r_["slot"] == sT2)
+_nop = sum(1 for r_ in _ro if r_["team"] != _kt)
+assert len(st2.get("beaten", [])) >= _nop, (st2.get("beaten"), "of", _nop)
+print("ok  Dance: high die walks past the whole defence",
+      len(st2.get("beaten", [])), "/", _nop)
+
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")
