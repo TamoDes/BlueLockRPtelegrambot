@@ -143,6 +143,10 @@ class Ability:
     # Applied at the end of resolve() (after any goal he scored), so the
     # debuff survives the goal it was dealt on — Taha: "تا گل بعدی".
     beats: int = 0
+    # Hugo's Phantom Call: he throws three dice and calls one of them real. The
+    # defender must name the called die — a right call means a normal contest,
+    # a wrong call gives the pass/shot away outright (Taha: "گارانتی رد یا گل").
+    bluff: bool = False
     # "از بین یک الی N نفر": on a SUCCESSFUL move the actor carries past up to
     # `through` more opponents. The attack die sets how many (capped), so the
     # count really lands in the 1..N band. Those opponents are marked beaten

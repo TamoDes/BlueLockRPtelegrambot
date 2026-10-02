@@ -457,6 +457,17 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             if armed.puppet and action == "pass" and duel.get("target") is not None:
                 duel["puppet"] = {"rin": actor["slot"], "mate": duel["target"], "aid": armed.id}
             abilities.note(state, actor["name"], armed, icon=abilities.icon_for(armed))
+        elif armed.bluff:
+            abilities.spend_armed(state, actor["slot"])
+            _stash_goal(armed)
+            if duel.get("defender") is not None:
+                # three dice, one of them called real — the defender must name it
+                duel["bluff"] = {"real": random.randint(1, 3),
+                                 "picker": duel["defender"],
+                                 "src": armed.name, "aid": armed.id}
+            else:
+                duel["auto"] = {"t": "win", "slot": actor["slot"], "aid": armed.id}
+            abilities.note(state, actor["name"], armed, icon=abilities.icon_for(armed))
         elif armed.gamble:
             abilities.spend_armed(state, actor["slot"])
             _stash_goal(armed)
@@ -689,7 +700,11 @@ def _roles(duel: dict) -> list[tuple[str, str, int | None]]:
         return []
     if duel.get("no_dice"):
         return []
-    roles = [("att", "att_die", duel["actor"])]
+    roles = []
+    _bl = duel.get("bluff")
+    if _bl and duel.get("bluff_pick") is None and _bl.get("picker") is not None:
+        roles.append(("bluff", "bluff_pick", _bl["picker"]))
+    roles.append(("att", "att_die", duel["actor"]))
     wall = duel.get("wall") or []
     if duel["action"] == "shoot" and not duel.get("gamble"):
         for slot in wall:
@@ -751,6 +766,8 @@ def awaiting(match) -> dict | None:
     out = {"role": role, "slot": slot, "name": row["name"], "user_id": row["user_id"], "duel": duel}
     if role in ("spot", "spot_gk"):
         out["label"] = "Pick your corner" if role == "spot" else "Call the keeper's dive"
+    if role == "bluff":
+        out["label"] = "Which die did he call real?"
     return out
 
 
@@ -802,6 +819,30 @@ def submit_spot(match_id: int, user_id: int, target: str) -> dict:
     if target not in PENALTY_TARGETS:
         return {"status": "invalid"}
     return _claim(match_id, user_id, target, ("spot", "spot_gk"))
+
+
+def submit_bluff(match_id: int, user_id: int, pick: int) -> dict:
+    """Hugo's Phantom Call: the defender names which of the three dice is real.
+    Call it right and the duel runs normally; call it wrong and there is no
+    contest — his pass/shot lands ("گارانتی رد یا گل")."""
+    if pick not in (1, 2, 3):
+        return {"status": "invalid"}
+    out = _claim(match_id, user_id, pick, ("bluff",))
+    if out.get("status") != "ok":
+        return out
+    with db.tx() as c:
+        row = c.execute("SELECT pending FROM matches WHERE id=? AND phase='duel'", (match_id,)).fetchone()
+        if not row:
+            return out
+        state = json.loads(row["pending"] or "{}")
+        duel = state.get("duel") or {}
+        bl = duel.get("bluff") or {}
+        if bl and duel.get("bluff_pick") is not None and duel["bluff_pick"] != bl.get("real"):
+            duel["auto"] = {"t": "win", "slot": duel.get("actor"),
+                            "aid": bl.get("aid"), "src": bl.get("src"),
+                            "bluff_miss": True}
+            c.execute("UPDATE matches SET pending=? WHERE id=?", (json.dumps(state), match_id))
+    return out
 
 
 def record_die(match_id: int, role: str, value: int) -> bool:

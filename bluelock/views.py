@@ -347,6 +347,8 @@ def duel_board(match, roster) -> str:
         prompt = f"🎯 <b>{who}</b> — pick your corner."
     elif role == "spot_gk":
         prompt = f"🧤 Defending captain <b>{who}</b> — where's he shooting?"
+    elif role == "bluff":
+        prompt = f"🃏 <b>{who}</b> — which of his three dice is real?"
     elif role == "gk":
         prompt = "🧤 The keeper dives — bot rolls."
     elif isinstance(auto, dict):

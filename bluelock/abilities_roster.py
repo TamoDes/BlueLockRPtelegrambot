@@ -277,8 +277,9 @@ def register_extras() -> None:
     ])
     _register("hugo", [
         Ability("hugo_p1", "hugo", "passive", 1, "Phantom Pass/Shot",
-            "His pass or shot wins the duel with no roll.",
-            auto="win", when=lambda c: c["action"] in ("pass", "shoot")),
+            "Calls one of three dice real. Call it right and they compete; "
+            "call it wrong and his pass or shot wins outright.",
+            bluff=True, when=lambda c: c["action"] in ("pass", "shoot")),
         Ability("hugo_s1", "hugo", "skill", 1, "Long Drive",
             "Keeper −2 on his shot.",
             gk_down=2, when=lambda c: c["action"] == "shoot"),

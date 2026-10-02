@@ -1495,5 +1495,34 @@ assert len(st2.get("beaten", [])) >= _nop, (st2.get("beaten"), "of", _nop)
 print("ok  Dance: high die walks past the whole defence",
       len(st2.get("beaten", [])), "/", _nop)
 
+# S22: Hugo's Phantom Pass/Shot — three dice, one of them called real.
+hugo_u = make_user("hugo")
+mH = build_match([(hugo_u, def_u), (isagi_u, def_u2)])
+sH = slot_of(mH, hugo_u)
+stage(mH, sH, zone=1)
+do_arm(mH, sH, "hugo_p1")
+engine.open_duel(mH, "pass", slot_of(mH, isagi_u))
+pH = engine.awaiting(db.match(mH))
+assert pH and pH["role"] == "bluff", pH
+real = engine.pending_of(db.match(mH))["duel"]["bluff"]["real"]
+assert engine.submit_bluff(mH, pH["user_id"], 1 if real != 1 else 2)["status"] == "ok"
+assert engine.ready(db.match(mH)), "a wrong call ends the contest"
+out = engine.resolve(mH)
+assert out["outcome"] == "pass_ok", out
+print("ok  Phantom Call: wrong call -> his pass lands with no roll")
+
+mH2 = build_match([(hugo_u, def_u), (isagi_u, def_u2)])
+sH2 = slot_of(mH2, hugo_u)
+stage(mH2, sH2, zone=1)
+do_arm(mH2, sH2, "hugo_p1")
+engine.open_duel(mH2, "pass", slot_of(mH2, isagi_u))
+pH2 = engine.awaiting(db.match(mH2))
+real2 = engine.pending_of(db.match(mH2))["duel"]["bluff"]["real"]
+assert engine.submit_bluff(mH2, pH2["user_id"], real2)["status"] == "ok"
+assert not engine.ready(db.match(mH2)), "the contest still needs its dice"
+out = roll_and_resolve(mH2, att=1, dfn=6)
+assert out["outcome"] != "pass_ok", out   # a right call really can cost him
+print("ok  Phantom Call: right call -> they compete and he can lose")
+
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

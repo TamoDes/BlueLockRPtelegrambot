@@ -274,6 +274,15 @@ def spot_keyboard(match_id: int, role: str) -> types.InlineKeyboardMarkup:
     return kb
 
 
+def bluff_keyboard(match_id: int) -> types.InlineKeyboardMarkup:
+    kb = types.InlineKeyboardMarkup(row_width=3)
+    kb.add(*[
+        types.InlineKeyboardButton(f"🎲 Die {n}", callback_data=f"bluff|{match_id}|{n}")
+        for n in (1, 2, 3)
+    ])
+    return kb
+
+
 def prompt_dice(match_id: int) -> None:
     match = db.match(match_id)
     if not match or match["phase"] != "duel":
@@ -296,6 +305,17 @@ def prompt_dice(match_id: int) -> None:
                 chat_id,
                 f"🎯 <b>{who}</b> — {label}!{suffix}",
                 reply_markup=spot_keyboard(match_id, role),
+            )
+        return
+
+    if role == "bluff":
+        for chat_id in broadcast_targets(match):
+            safe(
+                bot.send_message,
+                chat_id,
+                f"🃏 Three dice, one of them called real. "
+                f"<b>{who}</b> — which die is it?",
+                reply_markup=bluff_keyboard(match_id),
             )
         return
 
@@ -454,6 +474,31 @@ def advance_cb(call):
         stamp_pending_turn(match, engine.pending_of(match))
         render_match(match_id)
     safe(bot.answer_callback_query, call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("bluff|"))
+def bluff_cb(call):
+    seen(call)
+    parts = call.data.split("|")
+    if len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) not in (1, 2, 3):
+        safe(bot.answer_callback_query, call.id)
+        return
+    match_id = int(parts[1])
+    pick = int(parts[2])
+    result = engine.submit_bluff(match_id, call.from_user.id, pick)
+    if result["status"] == "wrong":
+        safe(bot.answer_callback_query, call.id, f"That's {result['name']}'s call.", show_alert=True)
+        return
+    if result["status"] != "ok":
+        safe(bot.answer_callback_query, call.id)
+        return
+    safe(bot.answer_callback_query, call.id, f"🎲 Die {pick}")
+    broadcast(
+        db.match(match_id),
+        f"🃏 <b>{esc(result['name'])}</b> called die {pick}",
+        skip=call.message.chat.id if call.message else None,
+    )
+    advance(match_id)
 
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("spot|"))
