@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "bluelock.db"
 ENV_FILE = BASE_DIR / ".env"
 LEGACY_WALLET = BASE_DIR / "wallets.json"
 
@@ -19,6 +18,11 @@ def _load_env(path: Path) -> None:
 
 
 _load_env(ENV_FILE)
+
+# Where the SQLite file lives. Overridable via BLUELOCK_DB_PATH (.env or process
+# env) so hosts with a persistent volume (e.g. Railway) can persist player data;
+# default stays next to the repo — local behaviour is unchanged.
+DB_PATH = Path(os.environ.get("BLUELOCK_DB_PATH") or (BASE_DIR / "bluelock.db"))
 
 BOT_TOKEN = os.environ.get("BLUELOCK_BOT_TOKEN", "").strip()
 if not BOT_TOKEN:
