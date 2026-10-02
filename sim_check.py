@@ -1589,5 +1589,58 @@ out = roll_and_resolve(mB, att=6, dfn=1, gk=1)
 assert out["outcome"] == "goal", out
 assert not engine.pending_of(db.match(mB)).get("monster"), "the stack dies with the goal"
 print("ok  Monster Moment: a goal wipes the stack")
+# S26: the stance key — one charge, one stance, never both at once
+k_u = make_user("knight")
+mk = build_match([(k_u, def_u)])   # 1v1 — Teddy is the only man who can defend
+sk = slot_of(mk, k_u)
+o_def = slot_of(mk, def_u)
+for _x in abilities.starter_ids("knight"): db.grant_unlock(k_u, _x)
+
+def stance(mid, holder_slot, mode, arm_slot):
+    st = engine.fresh_state()
+    st["zone"] = 0
+    if mode is not None and arm_slot is not None:
+        st.setdefault("modes", {})[str(arm_slot)] = mode
+    if arm_slot is not None:
+        st.setdefault("armed", {})[str(arm_slot)] = "knight_p1"
+    db.update_match(mid, pending=json.dumps(st), phase="opening", holder=holder_slot)
+
+# arm_skill is what stores the stance
+stance(mk, sk, None, None)      # arm_skill does the arming AND the stance
+db.update_match(mk, phase="play")
+res = engine.arm_skill(mk, k_u, "knight_p1", mode="sword")
+assert res["status"] == "armed", res
+assert engine.pending_of(db.match(mk)).get("modes", {}).get(str(sk)) == "sword"
+db.update_match(mk, phase="opening")
+
+o = engine.open_duel(mk, "dribble", None)
+b = dict(o["duel"]["att_boosts"])
+assert b.get("Knight Defense / Knight Sword") == 1, b       # +1 on his dribble
+assert not o["duel"]["def_boosts"], "the sword stance never shields"
+engine.cancel_duel(mk)
+print("ok  Knight Sword: +1 on his dribble and no defense in the way")
+
+# the other stance, this time with somebody running at him
+stance(mk, o_def, "defense", sk)
+o = engine.open_duel(mk, "dribble", sk)
+b = dict(o["duel"]["def_boosts"])
+assert b.get("Knight Defense / Knight Sword") == 2, \
+    {"boosts": b, "defender": o["duel"].get("defender"), "wall": o["duel"].get("wall"),
+     "modes": engine.pending_of(db.match(mk)).get("modes"),
+     "armed": engine.pending_of(db.match(mk)).get("armed")}
+assert not o["duel"]["att_boosts"], "the defense stance never swings"
+out = roll_and_resolve(mk, att=1, dfn=6)                      # he wins the ball
+assert out["outcome"] in ("tackled", "blocked"), out
+st = engine.pending_of(db.match(mk))
+assert (st.get("hold_buff") or {}).get("amt") == 2, st.get("hold_buff")
+print("ok  Knight Defense: +2 in his face, and +2 rides the ball he wins")
+
+# ...and that bonus rides for as long as he keeps it
+db.update_match(mk, pending=json.dumps(st), phase="opening", holder=sk)
+o = engine.open_duel(mk, "dribble", None)
+b = dict(o["duel"]["att_boosts"])
+assert b.get("Knight Defense / Knight Sword") == 2, b
+engine.cancel_duel(mk)
+print("ok  Knight Defense: the bonus rides his possession")
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

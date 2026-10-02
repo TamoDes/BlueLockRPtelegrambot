@@ -172,6 +172,9 @@ class Ability:
     # Monster Moment: each dribble he lands tops up a stack that rides on every
     # action of his until the next goal wipes it.
     dribble_stack: int = 0
+    # Knight Defense: paid when he wins the ball, rides his possession and dies
+    # with it (Taha: "تا زمانی که توپ دستشه").
+    hold_bonus: int = 0
     aura_gk: int = 0
     gamble: bool = False
     gamble_min: int = 0
@@ -1046,6 +1049,8 @@ def build_ctx(match, roster, self_row, other_row, action: str, zone: int, state:
         "unmarked": other_row is None,
         "last_pass": state.get("last_pass"),
         "loose": state.get("loose_claim_slot"),
+        # the stance the player picked when he armed his passive
+        "mode": (state.get("modes") or {}).get(str(self_row["slot"])),
         "self": self_row,
         "other": other_row,
         "roster": roster,

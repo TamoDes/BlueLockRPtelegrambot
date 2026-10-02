@@ -559,6 +559,17 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             abilities.note(state, actor["name"], _mab,
                            f"monster stack +{_mon['amt']}", icon="👹")
 
+    # Knight Defense: the ball he won came with a bonus attached, and it rides
+    # every action of his for as long as he keeps the ball.
+    _hb = state.get("hold_buff")
+    if _hb and _hb.get("slot") == actor["slot"] and match["holder"] == actor["slot"]:
+        duel["att_power"] += _hb["amt"]
+        duel["att_boosts"].append((_hb.get("name", "Knight Defense"), _hb["amt"]))
+        _hab = abilities.get(_hb.get("src", ""))
+        if _hab:
+            abilities.note(state, actor["name"], _hab,
+                           f"riding the ball +{_hb['amt']}", icon="🛡")
+
     # persistent streaks — survive turnovers, filtered by scope
     for b in state.get("streaks", []):
         if b.get("slot") == actor["slot"] and (b.get("scope") in (None, action)):
@@ -608,6 +619,10 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                 duel[power_key] += val
                 duel[boost_key].append((d_armed.name, val))
                 abilities.note(state, row["name"], d_armed, icon=abilities.icon_for(d_armed))
+                if d_armed.hold_bonus and (ctx_def.get("mode") or "defense") == "defense":
+                    # paid out if winning the ball puts it at his feet
+                    state["pending_hold"] = {"slot": row["slot"], "amt": d_armed.hold_bonus,
+                                             "name": d_armed.name, "src": d_armed.id}
         else:
             if d_armed.die_floor:
                 abilities.spend_armed(state, row["slot"])
@@ -899,7 +914,8 @@ def record_die(match_id: int, role: str, value: int) -> bool:
         return True
 
 
-def arm_skill(match_id: int, user_id: int, ability_id: str) -> dict:
+def arm_skill(match_id: int, user_id: int, ability_id: str,
+              mode: str | None = None) -> dict:
     """Player presses the ⚡ button: arm (or cancel-arm) a ready skill or passive."""
     ab = abilities.get(ability_id)
     if ab is None:
@@ -923,6 +939,9 @@ def arm_skill(match_id: int, user_id: int, ability_id: str) -> dict:
         if not row:
             return {"status": "closed"}
         state = json.loads(row["pending"] or "{}")
+        if mode in ("defense", "sword"):
+            # the stance he picks when he arms it (Knight Defense / Knight Sword)
+            state.setdefault("modes", {})[str(me["slot"])] = mode
         if not abilities.usable(state, ab):
             return {"status": "spent"}
         if ab.kind == "skill":
@@ -1119,6 +1138,13 @@ def resolve(match_id: int) -> dict | None:
         state["chain"] = 0
         state["buffs"] = []
         state.pop("monster", None)   # the stack dies with the goal, like any buff
+        # Knight Defense: winning the ball brings the stance bonus with it, and
+        # losing it takes the bonus away.
+        _ph = state.pop("pending_hold", None)
+        if _ph and _ph.get("slot") == slot:
+            state["hold_buff"] = _ph
+        elif (state.get("hold_buff") or {}).get("slot") != slot:
+            state.pop("hold_buff", None)
         if actor is not None:
             beaten.append(actor["slot"])
         for w in wall_beaten:
@@ -1484,6 +1510,7 @@ def resolve(match_id: int) -> dict | None:
     # --- Emperor (Kaiser): everyone he shot past takes -1 until the next goal.
     # Paid out HERE — after any goal the shot just scored — so the debuff is
     # dealt on the goal and survives it (Taha: "تا گل بعدی", any goal clears it).
+    state.pop("pending_hold", None)   # never won the ball → never paid
     pb = state.pop("pending_beats", None)
     if pb:
         _pb_ab = abilities.get(pb.get("src", ""))

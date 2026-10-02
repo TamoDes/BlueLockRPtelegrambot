@@ -522,6 +522,35 @@ def bluff_set_cb(call):
     advance(match_id)
 
 
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("kmode|"))
+def kmode_cb(call):
+    seen(call)
+    parts = call.data.split("|")
+    if len(parts) != 3 or parts[2] not in ("defense", "sword"):
+        safe(bot.answer_callback_query, call.id)
+        return
+    match_id, mode = int(parts[1]), parts[2]
+    res = engine.arm_skill(match_id, call.from_user.id, "knight_p1", mode=mode)
+    if res["status"] == "armed":
+        safe(bot.answer_callback_query, call.id, f"{'🛡' if mode == 'defense' else '⚔'} {mode.title()}")
+        broadcast(
+            db.match(match_id),
+            f"{'🛡' if mode == 'defense' else '⚔'} <b>{esc(res['name'])}</b> armed as "
+            f"<b>{mode.title()}</b> — fires with his next play",
+        )
+        return
+    toasts = {
+        "disarmed": f"🛡 {res.get('name')} cancelled — charge refunded.",
+        "swap": "Already armed: {name}. Tap it to cancel first.".format(name=res.get('name', "")),
+        "spent": "No charges left for that ability this match.",
+        "foreign": "That ability belongs to another character.",
+        "notturn": "Offensive abilities arm on your own turn — defensive ones (🛡) anytime.",
+        "closed": "Not right now.",
+        "invalid": "Unknown ability.",
+    }
+    safe(bot.answer_callback_query, call.id, toasts.get(res["status"], "Not right now."), show_alert=True)
+
+
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("bluff|"))
 def bluff_cb(call):
     seen(call)
@@ -611,6 +640,18 @@ def skill_cb(call):
         return
     _, mid, aid = parts
     match_id = int(mid)
+    if aid == "knight_p1":
+        # Stance key: he picks the mode BEFORE the charge goes down.
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            types.InlineKeyboardButton("🛡 Knight Defense", callback_data=f"kmode|{mid}|defense"),
+            types.InlineKeyboardButton("⚔ Knight Sword", callback_data=f"kmode|{mid}|sword"),
+        )
+        safe(bot.answer_callback_query, call.id, "Pick your stance")
+        safe(bot.send_message, call.message.chat.id,
+             "⚜ <b>Knight Defense / Knight Sword</b>\nPick the stance you fight in:",
+             reply_markup=kb)
+        return
     res = engine.arm_skill(match_id, call.from_user.id, aid)
     alerts = {"swap", "spent", "foreign", "notturn"}
     icon = "🛡" if res.get("kind") == "passive" else "⚡"
