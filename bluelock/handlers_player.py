@@ -150,7 +150,7 @@ def _pull(message, paid: bool):
     key = current["char_key"] if current else None
     released = f"\n♻️ <b>{esc(name_of(key))}</b> released." if key else ""
     kit_hint = (
-        f"\n⚡ Kit unlocked: {' · '.join(ab.name for ab in abilities.kit_for_char(char_key) if ab.tier == 1)}"
+        f"\n⚡ Kit unlocked: {' · '.join(ab.name for ab in abilities.kit_for_char(char_key) if ab.id in abilities.starter_ids(char_key))}"
         if abilities.enabled()
         else ""
     )
@@ -450,7 +450,8 @@ def unlock_cb(call):
     seen(call)
     aid = call.data.split("|", 1)[1]
     ab = abilities.get(aid)
-    if ab is None or ab.tier == 1:
+    # passives are free starters (never sold); tier-1 skills ARE buyable
+    if ab is None or (ab.tier == 1 and ab.kind != "skill"):
         safe(bot.answer_callback_query, call.id)
         return
     own = db.owned_by(call.from_user.id)
@@ -749,7 +750,7 @@ def buyroll_cb(call):
     if call.message:
         stats = effective_stats(char_key, {})
         kit_hint = (
-            f"\n⚡ Kit: {' · '.join(ab.name for ab in abilities.kit_for_char(char_key) if ab.tier == 1)}"
+            f"\n⚡ Kit: {' · '.join(ab.name for ab in abilities.kit_for_char(char_key) if ab.id in abilities.starter_ids(char_key))}"
             if abilities.enabled()
             else ""
         )

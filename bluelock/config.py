@@ -129,6 +129,9 @@ LIMIT_LEVELS = (5, 10, 15, 20, 25)
 MAX_LIMITS = 5
 BOOST_LEVELS = LIMIT_LEVELS  # training slots unlock with the limit picks (5/10/15/20/25)
 
+# tier-1 skills are NOT granted at start (passives are) — buy them in the kit menu
+ABILITY_T1_LEVEL = 5
+ABILITY_T1_COST = 150_000
 ABILITY_T2_LEVEL = 15
 ABILITY_T2_COST = 1_500_000
 ABILITY_T3_LEVEL = 30

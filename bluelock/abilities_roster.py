@@ -22,7 +22,8 @@ from .abilities import (
 
 def _register(char_key: str, items: list[Ability]) -> None:
     if char_key not in STARTERS:
-        STARTERS[char_key] = [ab.id for ab in items if ab.tier == 1]
+        # starters = passives only — skills start LOCKED and are bought later
+        STARTERS[char_key] = [ab.id for ab in items if ab.tier == 1 and ab.kind == "passive"]
     known = {ab.id for ab in BY_CHAR.get(char_key, [])}
     for ab in items:
         REGISTRY[ab.id] = ab
@@ -275,9 +276,9 @@ def register_extras() -> None:
             save_margin=2, when=lambda c: c["action"] == "shoot"),
     ])
     _register("hugo", [
-        Ability("hugo_p1", "hugo", "passive", 1, "Everywhere",
-            "+1 attack and +1 defense at all times.",
-            att=lambda c: 1, dfd=lambda c: 1),
+        Ability("hugo_p1", "hugo", "passive", 1, "Phantom Pass/Shot",
+            "His pass or shot wins the duel with no roll.",
+            auto="win", when=lambda c: c["action"] in ("pass", "shoot")),
         Ability("hugo_s1", "hugo", "skill", 1, "Long Drive",
             "Keeper −2 on his shot.",
             gk_down=2, when=lambda c: c["action"] == "shoot"),
@@ -330,9 +331,9 @@ def register_extras() -> None:
             gk_down=2, when=lambda c: c["action"] == "shoot" and c["zone"] >= ZONE_SHOOT),
     ])
     _register("knight", [
-        Ability("knight_p1", "knight", "passive", 1, "Prodigy's Touch",
-            "+1 to all duels at all times.",
-            att=lambda c: 1),
+        Ability("knight_p1", "knight", "passive", 1, "Knight Defense / Knight Sword",
+            "+2 when he defends against a dribble.",
+            dfd=lambda c: 2 if c["action"] == "dribble" else 0),
         Ability("knight_s1", "knight", "skill", 1, "Complete Striker",
             "Beats his marker with no roll and lands one zone forward.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble"),
@@ -363,9 +364,9 @@ def register_extras() -> None:
             save_self=True, when=lambda c: c["action"] == "shoot"),
     ])
     _register("lavinho", [
-        Ability("lavinho_p1", "lavinho", "passive", 1, "Flair",
-            "+1 Dribble at all times.",
-            att=lambda c: 1 if c["action"] == "dribble" else 0),
+        Ability("lavinho_p1", "lavinho", "passive", 1, "Dance",
+            "+3 on his dribble.",
+            att=lambda c: 3 if c["action"] == "dribble" else 0),
         Ability("lavinho_s1", "lavinho", "skill", 1, "Elastica",
             "Beats his marker with no roll and lands one zone forward.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble"),

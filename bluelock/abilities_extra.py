@@ -15,7 +15,8 @@ def _register(char_key: str, items: list[Ability]) -> None:
     from .abilities import STARTERS
 
     if char_key not in STARTERS:
-        STARTERS[char_key] = [ab.id for ab in items if ab.tier == 1]
+        # starters = passives only — skills start LOCKED and are bought later
+        STARTERS[char_key] = [ab.id for ab in items if ab.tier == 1 and ab.kind == "passive"]
     known = {ab.id for ab in BY_CHAR.get(char_key, [])}
     for ab in items:
         REGISTRY[ab.id] = ab
@@ -304,9 +305,9 @@ def register_extras() -> None:
             pass_advance=1, pass_buff=4),
     ])
     _register("charles", [
-        Ability("charles_p1", "charles", "passive", 1, "Royal Weight",
-            "+1 on his passes.",
-            att=lambda c: 1 if c["action"] == "pass" else 0),
+        Ability("charles_p1", "charles", "passive", 1, "French Pass",
+            "+2 on his pass; receiver's next action +1.",
+            att=lambda c: 2 if c["action"] == "pass" else 0, pass_buff=1),
         Ability("charles_s1", "charles", "skill", 1, "Switch of Play",
             "Completed pass: receiver breaks two zones.",
             pass_advance=2),

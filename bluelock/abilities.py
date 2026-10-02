@@ -5,6 +5,8 @@ from typing import Callable, Optional
 
 from . import db
 from .config import (
+    ABILITY_T1_COST,
+    ABILITY_T1_LEVEL,
     ABILITY_T2_COST,
     ABILITY_T2_LEVEL,
     ABILITY_T3_COST,
@@ -361,9 +363,9 @@ STARTERS: dict[str, list[str]] = {}
 _KITS = [
     # ---------------------------------------------------------------- SSR
     ("isagi", [
-        _reg(Ability("isagi_p1", "isagi", "passive", 1, "Direct Hit",
-            "+2 Shot right after receiving a pass.",
-            att=lambda c: 2 if c["action"] == "shoot" and _after_pass(c) else 0)),
+        _reg(Ability("isagi_p1", "isagi", "passive", 1, "Last Puzzle",
+            "+2 Shot once a defender has been beaten this attack.",
+            att=lambda c: 2 if c["action"] == "shoot" and c["beaten_n"] >= 1 else 0)),
         _reg(Ability("isagi_s1", "isagi", "skill", 1, "Meta Vision Read",
             "While marking: intercept an opponent pass with no roll.",
             auto="stop", when=lambda c: c["action"] == "pass")),
@@ -375,9 +377,9 @@ _KITS = [
             save_margin=1, when=lambda c: c["action"] == "shoot")),
     ]),
     ("rin", [
-        _reg(Ability("rin_p1", "rin", "passive", 1, "Cold Predator",
-            "+2 to all duels while his team is losing.",
-            att=lambda c: 2 if _losing(c) else 0)),
+        _reg(Ability("rin_p1", "rin", "passive", 1, "Puppet",
+            "Completed pass can't be picked off; receiver's next action +2.",
+            auto="win", pass_buff=2, when=lambda c: c["action"] == "pass")),
         _reg(Ability("rin_s1", "rin", "skill", 1, "Perfect Form",
             "His shot beats the marker with no roll.",
             auto="win", when=lambda c: c["action"] == "shoot")),
@@ -391,9 +393,9 @@ _KITS = [
             tie_win=True, when=lambda c: c["action"] == "freekick")),
     ]),
     ("sae", [
-        _reg(Ability("sae_p1", "sae", "passive", 1, "World-Class Weight",
-            "+2 Passing.",
-            att=lambda c: 2 if c["action"] == "pass" else 0)),
+        _reg(Ability("sae_p1", "sae", "passive", 1, "Winning Movement",
+            "Completed pass: receiver's next action +2.",
+            pass_buff=2, when=lambda c: c["action"] == "pass")),
         _reg(Ability("sae_s1", "sae", "skill", 1, "Maestro's Through Ball",
             "Completed pass gives the receiver +2 next action.",
             pass_buff=2)),
@@ -406,9 +408,10 @@ _KITS = [
             when=lambda c: c["action"] == "freekick")),
     ]),
     ("kaiser", [
-        _reg(Ability("kaiser_p1", "kaiser", "passive", 1, "Kaiser Impact",
-            "+2 Shot inside the box.",
-            att=lambda c: 2 if c["action"] == "shoot" and _box(c) else 0)),
+        _reg(Ability("kaiser_p1", "kaiser", "passive", 1, "Emperor",
+            "+2 on his shot.",
+            att=lambda c: 2 if c["action"] == "shoot" else 0,
+            when=lambda c: c["action"] == "shoot")),
         _reg(Ability("kaiser_s1", "kaiser", "skill", 1, "Emperor's Draw",
             "Lost field duel → his team wins the set piece.",
             on_lost="foul")),
@@ -449,9 +452,9 @@ _KITS = [
     ]),
     # ---------------------------------------------------------------- SR
     ("barou", [
-        _reg(Ability("barou_p1", "barou", "passive", 1, "King's Domain",
-            "+2 Shot inside the box.",
-            att=lambda c: 2 if c["action"] == "shoot" and _box(c) else 0)),
+        _reg(Ability("barou_p1", "barou", "passive", 1, "Hungry G Point",
+            "+2 Shot right after receiving a pass.",
+            att=lambda c: 2 if c["action"] == "shoot" and _after_pass(c) else 0)),
         _reg(Ability("barou_s1", "barou", "skill", 1, "Predator Tackle",
             "While marking: wins the ball with no roll.",
             auto="stop")),
@@ -477,13 +480,13 @@ _KITS = [
             gamble=True, gamble_min=2, when=lambda c: c["action"] == "dribble")),
     ]),
     ("bachira", [
-        _reg(Ability("bachira_p1", "bachira", "passive", 1, "Monster Dribble",
-            "+2 Dribble on the first duel of an attack.",
-            att=lambda c: 2 if c["action"] == "dribble" and _first_link(c) else 0)),
+        _reg(Ability("bachira_p1", "bachira", "passive", 1, "Monster Moment",
+            "+2 on his dribble.",
+            att=lambda c: 2 if c["action"] == "dribble" else 0)),
         _reg(Ability("bachira_s1", "bachira", "skill", 1, "Monster Time",
             "Beats his marker with no roll + one extra zone.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble")),
-        _reg(Ability("bachira_p2", "bachira", "passive", 2, "Freestyle Flow",
+        _reg(Ability("bachira_p2", "bachira", "passive", 2, "Monster Freestyle",
             "Dice never roll below 2.",
             die_floor=2)),
         _reg(Ability("bachira_s2", "bachira", "skill", 3, "Golden Link",
@@ -563,9 +566,9 @@ _KITS = [
             when=lambda c: c["action"] == "shoot")),
     ]),
     ("kunigami", [
-        _reg(Ability("kunigami_p1", "kunigami", "passive", 1, "Hero Power",
-            "+1 Shot and +1 Free Kick.",
-            att=lambda c: 1 if c["action"] in ("shoot", "freekick") else 0)),
+        _reg(Ability("kunigami_p1", "kunigami", "passive", 1, "Long Shot",
+            "+3 on his shot.",
+            att=lambda c: 3 if c["action"] == "shoot" else 0)),
         _reg(Ability("kunigami_s1", "kunigami", "skill", 1, "Wild Card Volley",
             "Next action of any teammate +2; his own shot +1.",
             pass_buff=2, att=lambda c: 1 if c["action"] == "shoot" else 0)),
@@ -770,7 +773,8 @@ _KITS = [
 ]
 
 for char_key, items in _KITS:
-    STARTERS[char_key] = [ab.id for ab in items if ab.tier == 1]
+    # starters = passives only — skills start LOCKED and are bought later
+    STARTERS[char_key] = [ab.id for ab in items if ab.tier == 1 and ab.kind == "passive"]
     BY_CHAR[char_key] = items
 
 from .abilities_extra import register_extras as _register_extras
@@ -864,6 +868,8 @@ def kit_for_char(char_key: str) -> list[Ability]:
 
 
 def price_and_level(ab: Ability) -> tuple[int, int]:
+    if ab.tier == 1 and ab.kind == "skill":
+        return ABILITY_T1_COST, ABILITY_T1_LEVEL
     if ab.tier == 2:
         return ABILITY_T2_COST, ABILITY_T2_LEVEL
     if ab.tier == 3:

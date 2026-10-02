@@ -553,7 +553,7 @@ def kit_entries(row) -> list[str]:
 
 def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMarkup]:
     kb = types.InlineKeyboardMarkup(row_width=1)
-    owned = db.unlocked_ids(user_id)
+    owned = set(abilities.owned_ids(user_id, char_key))
     head = (
         f"⚡ <b>EQUIPMENT</b>\n"
         f"{icon_of(char_key)}<b>{esc(name_of(char_key))}</b> · {overall(effective_stats(char_key, {}))} OVR\n"
@@ -571,7 +571,7 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
             kind_tag += " · 🔗 bound"
         tag = TIER_TAG.get(ab.tier, "")
         title = f"{icon} <b>{ab.name}</b>{f'<i>{tag}{kind_tag}{cat_tag}</i>' if (tag or kind_tag or cat_tag) else ''}"
-        if ab.tier == 1 or ab.id in owned:
+        if ab.id in owned:
             blocks.append(
                 f"{title}\n{ab.desc}"
             )
@@ -836,9 +836,10 @@ def shop_page(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
             for i in range(0, len(btns), 2):
                 kb.row(*btns[i:i + 2])
         if abilities.enabled():
+            owned_now = set(abilities.owned_ids(user_id, own["char_key"]))
             locked = [
                 ab for ab in abilities.kit_for_char(own["char_key"])
-                if ab.tier > 1 and ab.id not in db.unlocked_ids(user_id)
+                if ab.id not in owned_now
             ]
             label = (f"⚡ Abilities — {len(locked)} unlock(s) available"
                      if locked else "⚡ Abilities — view kit")

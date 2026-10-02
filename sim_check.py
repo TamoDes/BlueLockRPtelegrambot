@@ -641,7 +641,7 @@ def roll_and_resolve(mid: int, att: int | None = None, dfn: int | None = None, g
     return engine.resolve(mid)
 
 
-# S1: Cold Predator + Bloodline Rivalry passives arm manually and stack while losing
+# S1: passives arm themselves and stack — one charge per match
 rin_u = make_user("rin", unlocks=["rin_p2"])
 isagi_u = make_user("isagi")
 def_u = make_user("wanima_a")
@@ -674,42 +674,41 @@ def restage(m: int, slot: int, **kw) -> None:
 restage(mid, rs, zone=0)
 opened = engine.open_duel(mid, "dribble", None)
 assert opened["duel"]["att_power"] == base_dri + 2, ("passive must arm itself", opened["duel"]["att_power"])
-assert opened["duel"]["att_boosts"] == [("Cold Predator", 2)], opened["duel"]["att_boosts"]
+assert opened["duel"]["att_boosts"] == [("Bloodline Rivalry", 2)], opened["duel"]["att_boosts"]
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
-assert st["charges"]["rin_p1"] == 0, "one-charge passive: the fired charge is spent"
-assert "rin_p1" in st["used"], "spent passive moves to used"
+assert st["charges"]["rin_p2"] == 0, "one-charge passive: the fired charge is spent"
+assert "rin_p2" in st["used"], "spent passive moves to used"
 
 restage(mid, rs, zone=0)
 opened = engine.open_duel(mid, "dribble", None)
-assert ("Cold Predator", 2) not in opened["duel"]["att_boosts"], "spent passive must not fire again"
+assert ("Bloodline Rivalry", 2) not in opened["duel"]["att_boosts"], "spent passive must not fire again"
 engine.cancel_duel(mid)
-assert engine.arm_skill(mid, rin_u, "rin_p1")["status"] == "spent"
+assert engine.arm_skill(mid, rin_u, "rin_p2")["status"] == "spent"
 print("ok  passives fire on their own: one charge per match, boosts tagged on the calc line")
 
-# S2: passive condition checked at resolution, not blindly.
-# last_pass holds the PASSER's slot, so stage a real received pass from the teammate.
+# S2: Last Puzzle (+2 Shot once a defender is beaten) — condition checked at resolution, not blindly.
 isagi_slot = slot_of(mid, isagi_u)
-mate_isagi = next(r["slot"] for r in db.roster(mid) if r["team"] == 1 and r["slot"] != isagi_slot)
+dslot = slot_of(mid, def_u2)
 base_sho = characters.base_stats("isagi")["shot"]
-arm_stage(mid, isagi_slot, "isagi_p1", zone=ZONE_SHOOT, last_pass=None)
-opened = engine.open_duel(mid, "shoot", None)
+arm_stage(mid, isagi_slot, "isagi_p1", zone=ZONE_SHOOT, beaten=[])
+opened = engine.open_duel(mid, "shoot", None)  # no one beaten yet → no boost
 assert opened["duel"]["att_power"] == base_sho, "condition not met — no boost, charge stays"
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
 assert "isagi_p1" not in st.get("used", []), "armed but unspent condition must stay charged"
-stage(mid, isagi_slot, zone=ZONE_SHOOT, last_pass=mate_isagi)
+stage(mid, isagi_slot, zone=ZONE_SHOOT, beaten=[dslot])
 do_arm(mid, isagi_slot, "isagi_p1")
-opened = engine.open_duel(mid, "shoot", None)
+opened = engine.open_duel(mid, "shoot", None)  # line broken → boost fires
 assert opened["duel"]["att_power"] == base_sho + 2
-assert opened["duel"]["att_boosts"] == [("Direct Hit", 2)]
+assert opened["duel"]["att_boosts"] == [("Last Puzzle", 2)]
 engine.cancel_duel(mid)
-stage(mid, isagi_slot, zone=ZONE_SHOOT, last_pass=None)
+stage(mid, isagi_slot, zone=ZONE_SHOOT, beaten=[])
 do_arm(mid, isagi_slot, "isagi_p1")
 opened = engine.open_duel(mid, "shoot", None)
-assert opened["duel"]["att_power"] == base_sho, "holding the ball without a fresh pass must NOT count"
+assert opened["duel"]["att_power"] == base_sho, "no beaten defender — no boost"
 engine.cancel_duel(mid)
-print("ok  Direct Hit fires only on a real received pass (passer slot != shooter)")
+print("ok  Last Puzzle fires only once the line is broken (no beaten defender → no boost, charge kept)")
 
 # S3: Impossible Trap must be ARMED; then auto-wins once and is spent
 nagi_u = make_user("nagi")
@@ -865,7 +864,7 @@ assert abilities.owned_ids(fresh, "sae") == starters
 assert db.grant_unlock(fresh, "sae_p2") is True
 assert db.grant_unlock(fresh, "sae_p2") is False
 text, kb = views.kit_page(fresh, "sae")
-assert "World-Class Weight" in text and "Possession Metronome" in text
+assert "Winning Movement" in text and "Possession Metronome" in text
 assert "button" in text.lower() or "\u26a1" in text
 print("ok  unlock economy + kit page renders")
 
