@@ -102,7 +102,7 @@ def rules_text() -> str:
         "\n<b>Cross</b> — FRK+🎲 vs the best defender; lands in the Final Third with an assist waiting."
         + "\n🥶 <b>Penalty</b>\nNo dice. You pick a corner, their captain calls the dive."
         "\nWrong corner → goal. Read corner → <b>always kept out</b>."
-        + "\n\n🛡 <b>Passives</b> arm themselves — <b>one charge</b> per match, always free."
+        + "\n\n🛡 <b>Passives</b> — <b>tap to arm</b> (they never fire on their own), <b>one charge</b> per match, always free."
         "\n⚡ <b>Skills</b> = one per match (2 with an extra skill slot); arm with the ⚡ button. 🎲 <b>Gamble</b> = the die decides."
         + quote("Every character fields six abilities — two innate, four earned through levels and yen. Full details in /abilities.")
         + "\n🏃 <b>Rotation</b> — every goal turns the positions, volleyball style: the back line steps forward."

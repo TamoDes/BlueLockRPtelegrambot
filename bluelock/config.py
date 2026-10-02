@@ -151,6 +151,10 @@ LEVEL_UP_BONUS = 250_000
 
 # ── bound system: starts at tier 1, upgrades buy a stronger version ────────
 BOUND_ENABLED = False  # TEST SEASON: Bound stays off; flip to True for release
+
+# Taha: ALL passives are manual — they never arm themselves; the player taps the
+# passive button to arm, and the charge burns when the effect actually fires.
+PASSIVES_MANUAL = os.environ.get("BLUELOCK_PASSIVES_MANUAL", "1") not in ("0", "false", "no")
 MAX_BOUND_TIER = 3
 BOUND_TIER_LEVEL = {2: 5, 3: 10}
 BOUND_TIER_COST = {2: 1_500_000, 3: 4_000_000}

@@ -641,7 +641,7 @@ def roll_and_resolve(mid: int, att: int | None = None, dfn: int | None = None, g
     return engine.resolve(mid)
 
 
-# S1: passives arm themselves — one charge per match
+# S1: passives are MANUAL — no tap, no fire; one charge per match
 # (cap = 1 passive + 2 skills: Rin's only own passive is Puppet — pass-triggered)
 rin_u = make_user("rin")
 isagi_u = make_user("isagi")
@@ -674,9 +674,19 @@ def restage(m: int, slot: int, **kw) -> None:
 
 restage(mid, rs, zone=0)
 mate = slot_of(mid, isagi_u)
+# Taha: passives never arm themselves — open with NO tap and nothing fires
+opened = engine.open_duel(mid, "pass", mate)
+assert not opened["duel"].get("auto"), (
+    "manual passive must not self-arm", opened["duel"].get("auto"))
+engine.cancel_duel(mid)
+
+# the player taps the passive button (arms it), then the pass fires it
+do_arm(mid, rs, "rin_p1")
+mrow = db.match(mid)
+assert db.claim_turn(mid, mrow["turn"], rs)
 opened = engine.open_duel(mid, "pass", mate)
 assert opened["duel"].get("auto") == {"t": "win", "slot": rs, "aid": "rin_p1"}, (
-    "passive must arm itself", opened["duel"].get("auto"))
+    "manually-armed passive must fire", opened["duel"].get("auto"))
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
 assert st["charges"]["rin_p1"] == 0, "one-charge passive: the fired charge is spent"
@@ -845,14 +855,16 @@ engine.cancel_duel(mid9)
 clean_att = make_user("wanima_j")
 mid10 = build_match([(clean_att, iga_u)])
 cas = slot_of(mid10, clean_att)
+dslot = slot_of(mid10, iga_u)
 stage(mid10, cas, zone=0)
+do_arm(mid10, dslot, "igaguri_p1")   # manual: the defender taps his passive
 engine.open_duel(mid10, "dribble", None)
 assert engine.submit_die(mid10, clean_att, 6)["status"] == "ok"
 assert engine.record_die(mid10, "def", 1) is True
 duel = engine.pending_of(db.match(mid10))["duel"]
-assert duel["def_floor"] == 2, "passive die floor must arm itself"
+assert duel["def_floor"] == 2, "manually-armed passive sets the die floor"
 engine.cancel_duel(mid10)
-print("ok  die floor arms itself on both sides")
+print("ok  die floor applies on both sides (armed manually)")
 
 # S11: economy gating — tiers, prices, innate starters, idempotent grants
 cost2, lv2 = abilities.price_and_level(abilities.get("rin_p2"))
@@ -974,6 +986,7 @@ mZ = build_match([(z_u, a_u)])
 zs = slot_of(mZ, z_u)
 stage(mZ, zs, zone=1)
 do_arm(mZ, zs, "zantetsu_s1")
+do_arm(mZ, slot_of(mZ, a_u), "aiku_p1")   # manual: defender taps his passive
 opened = engine.open_duel(mZ, "dribble", None)
 assert opened["duel"].get("auto", {}).get("t") == "win", "Steel Dash must win outright"
 assert any(nm == "Board Vision" for nm, _ in opened["duel"]["def_boosts"]), opened["duel"]["def_boosts"]
@@ -1345,6 +1358,7 @@ for _aid in abilities.starter_ids("rin"):
 for _aid in abilities.starter_ids("isagi"):
     db.grant_unlock(isagi_u, _aid)
 restage(mP, ps, zone=0)
+do_arm(mP, ps, "rin_p1")   # manual: Rin taps his passive before passing
 opened = engine.open_duel(mP, "pass", ms)
 assert opened["duel"].get("auto", {}).get("aid") == "rin_p1", (
     "puppet pass must be guaranteed", opened["duel"].get("auto"))

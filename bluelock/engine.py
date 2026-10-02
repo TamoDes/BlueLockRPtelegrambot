@@ -6,6 +6,7 @@ from .abilities import kits_by_user
 from .characters import effective_stats, role_of
 from .config import (
     BOUND_ENABLED,
+    PASSIVES_MANUAL,
     DICE_FACES,
     GOAL_TARGET,
     KEEPER_CATCH_ROLL,
@@ -397,12 +398,13 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
     notes: list[str] = []
     state["notes"] = notes
 
-    # --- passives arm themselves: pick an eligible one while the slot is free
+    # --- passives arm themselves (skipped entirely when PASSIVES_MANUAL)
     auto_slot = str(actor["slot"])
     if auto_slot not in state.get("armed", {}):
         for _ab in att_kit:
             if (
                 _ab.kind == "passive"
+                and not PASSIVES_MANUAL                     # manual: player taps the button
                 and _ab.id not in state.get("no_auto", [])
                 and abilities.usable(state, _ab)
                 and _gated(_ab, ctx_att)
@@ -517,6 +519,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             for _ab in abilities.kit_of(kits, row):
                 if (
                     _ab.kind == "passive"
+                    and not PASSIVES_MANUAL                 # manual: player taps the button
                     and _ab.id not in state.get("no_auto", [])
                     and abilities.usable(state, _ab)
                     and _gated(_ab, ctx_def)

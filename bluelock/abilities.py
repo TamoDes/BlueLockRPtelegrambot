@@ -142,6 +142,7 @@ class Ability:
     aura_gk: int = 0
     gamble: bool = False
     gamble_min: int = 0
+    manual: bool = False           # True = player must /use before it triggers; charge lasts until first goal
     long_shot: bool = False
     pass_advance: int = 0
     first_free: bool = False
