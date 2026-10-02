@@ -1561,5 +1561,33 @@ assert out.get("loose_finish"), out
 st = engine.pending_of(db.match(mL))
 assert "sae_p1" in st.get("used", []), "the loose-ball finish burns the charge"
 print("ok  loose finish: the keeper spills it and Sae walks it in for a sure goal")
+# S25: Monster Moment — the stack tops up on every dribble
+mB = build_match([(sim_u3, def_u), (rin_u, def_u2)])
+sB = slot_of(mB, sim_u3)
+for _x in abilities.starter_ids("bachira"): db.grant_unlock(sim_u3, _x)
+stage(mB, sB, zone=0)
+do_arm(mB, sB, "bachira_p1")
+o1 = engine.open_duel(mB, "dribble", None)
+assert dict(o1["duel"]["att_boosts"]).get("Monster Moment") == 2, o1["duel"]["att_boosts"]
+out = roll_and_resolve(mB, att=6, dfn=1)
+assert out["outcome"] == "dribble_ok", out
+assert engine.pending_of(db.match(mB)).get("monster", {}).get("amt") == 1, engine.pending_of(db.match(mB)).get("monster")
+# reopen the phase without wiping the state — stage() would kill the stack
+db.update_match(mB, pending=json.dumps(engine.pending_of(db.match(mB))), phase="opening", holder=sB)
+o2 = engine.open_duel(mB, "dribble", None)
+assert "duel" in o2, o2
+assert dict(o2["duel"]["att_boosts"]).get("Monster Moment") == 1, o2["duel"]["att_boosts"]
+out = roll_and_resolve(mB, att=6, dfn=1)
+assert out["outcome"] == "dribble_ok", out
+assert engine.pending_of(db.match(mB)).get("monster", {}).get("amt") == 2
+print("ok  Monster Moment: every dribble tops the stack up (+1, then +2)")
+# a goal wipes the stack like every other buff
+db.update_match(mB, pending=json.dumps(engine.pending_of(db.match(mB))), phase="opening", holder=sB)
+o3 = engine.open_duel(mB, "shoot", None)
+assert dict(o3["duel"]["att_boosts"]).get("Monster Moment") == 2, o3["duel"]["att_boosts"]
+out = roll_and_resolve(mB, att=6, dfn=1, gk=1)
+assert out["outcome"] == "goal", out
+assert not engine.pending_of(db.match(mB)).get("monster"), "the stack dies with the goal"
+print("ok  Monster Moment: a goal wipes the stack")
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

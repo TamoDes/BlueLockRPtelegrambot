@@ -169,6 +169,9 @@ class Ability:
     # ...and this one finishes it outright instead of just collecting it
     # ("گل گارانتی میزنه").
     finish_loose: bool = False
+    # Monster Moment: each dribble he lands tops up a stack that rides on every
+    # action of his until the next goal wipes it.
+    dribble_stack: int = 0
     aura_gk: int = 0
     gamble: bool = False
     gamble_min: int = 0
@@ -530,9 +533,11 @@ _KITS = [
     ]),
     ("bachira", [
         _reg(Ability("bachira_p1", "bachira", "passive", 1, "Monster Moment",
-            "+2 on his dribble; +2 more if a goal follows.",
+            "+2 on his dribble; every dribble after that tops up a stack that "
+            "rides on all of his actions until the next goal. His pass that "
+            "brings a goal pays +1 to him and +1 to the scorer.",
             att=lambda c: 2 if c["action"] == "dribble" else 0,
-            goal_self=2)),
+            dribble_stack=1, goal_self=1, goal_mate=1)),
         _reg(Ability("bachira_s1", "bachira", "skill", 1, "Monster Time",
             "Beats his marker with no roll + one extra zone.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble")),

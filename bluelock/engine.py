@@ -512,6 +512,10 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                     # he already read the field: nothing between him and goal
                     duel["auto"] = {"t": "win", "slot": actor["slot"], "aid": armed.id}
                     duel["sure_goal"] = True
+                if armed.dribble_stack and val:
+                    # Monster mode starts on this dribble; every one after it
+                    # tops the stack up (Taha: "هر دریبل +۱ موقتی").
+                    state["monster"] = {"slot": actor["slot"], "amt": 0, "src": armed.id}
                 # Sae / Charles carry an attack bonus AND a receiver buff. The
                 # bonus lands here and burns the charge, so the receiver buff
                 # would find nothing in resolve() — stash it for the completed pass.
@@ -544,6 +548,16 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
         else:
             kept_buffs.append(b)
     state["buffs"] = kept_buffs
+
+    # Bachira's Monster stack rides on every action of his until a goal wipes it.
+    _mon = state.get("monster")
+    if _mon and _mon.get("slot") == actor["slot"] and _mon.get("amt"):
+        duel["att_power"] += _mon["amt"]
+        duel["att_boosts"].append(("Monster Moment", _mon["amt"]))
+        _mab = abilities.get(_mon.get("src", ""))
+        if _mab:
+            abilities.note(state, actor["name"], _mab,
+                           f"monster stack +{_mon['amt']}", icon="👹")
 
     # persistent streaks — survive turnovers, filtered by scope
     for b in state.get("streaks", []):
@@ -1104,6 +1118,7 @@ def resolve(match_id: int) -> dict | None:
         state["last_pass"] = None
         state["chain"] = 0
         state["buffs"] = []
+        state.pop("monster", None)   # the stack dies with the goal, like any buff
         if actor is not None:
             beaten.append(actor["slot"])
         for w in wall_beaten:
@@ -1482,6 +1497,16 @@ def resolve(match_id: int) -> dict | None:
             abilities.note(state, actor["name"], _pb_ab,
                            f"{len(_targets)} beaten → {pb['amt']} until the next goal",
                            icon="👑")
+
+    # Monster Moment: every dribble he lands adds one more to the stack.
+    _mon = state.get("monster")
+    if (_mon and _mon.get("slot") == actor["slot"] and action == "dribble"
+            and out.get("outcome") == "dribble_ok"):
+        _mon["amt"] = _mon.get("amt", 0) + 1
+        _mab = abilities.get(_mon.get("src", ""))
+        if _mab:
+            abilities.note(state, actor["name"], _mab,
+                           f"dribble → stack now +{_mon['amt']}", icon="👹")
 
     state["beaten"] = beaten
     out["beaten"] = beaten
