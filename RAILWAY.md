@@ -13,16 +13,10 @@ webhook, no healthcheck URL).
    - Size: at least 1 GB
    Without a volume the SQLite file lives inside the container and **all
    player data is wiped on every redeploy**.
-3. **Settings → Variables** (set all of these):
+3. **Settings → Variables:**
    - `BLUELOCK_BOT_TOKEN` — from @BotFather (required; the bot exits without it)
    - `BLUELOCK_DB_PATH` = `/data/bluelock.db` — points the database onto the volume
-   - `BLUELOCK_ADMINS` — admin **usernames**, comma-separated, no @,
-     e.g. `thetamo,knight_ozuki` — whoever you list gets the admin panel
-   - `BLUELOCK_ADMIN_IDS` — optional: admin **Telegram user IDs** instead of /
-     in addition to usernames, e.g. `123456789,987654321`
-   - `BLUELOCK_SEASON` — optional, season number (default `1`)
-   Defaults only apply when a variable is empty: without `BLUELOCK_ADMINS`
-   the built-in list (`thetamo,knight_ozuki,itoshi_rin_org`) is used.
+   - `BLUELOCK_ADMINS` — optional, comma-separated usernames (no @)
 4. **Settings → Service → Service Type = Worker** (not HTTP).
 5. Deploy. First boot runs the SQLite migrations automatically and logs
    `@<botname> is live — season …`.
