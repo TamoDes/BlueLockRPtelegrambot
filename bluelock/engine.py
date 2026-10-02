@@ -440,9 +440,18 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
 
     # --- armed skill / passive of the attacker (manual activation) ------------
     armed = None if no_dice else abilities.peek_armed(state, actor["slot"])
+
+    def _stash_goal(ab) -> None:
+        """Remember this passive's goal payout — score_goal() pays it at the
+        next goal by the owner's team, then forgets it."""
+        if ab.goal_self or ab.goal_mate:
+            state["pending_goal"] = {"owner": actor["slot"], "src": ab.id,
+                                     "self_amt": ab.goal_self, "mate_amt": ab.goal_mate}
+
     if armed is not None and _gated(armed, ctx_att):
         if armed.auto == "win":
             abilities.spend_armed(state, actor["slot"])
+            _stash_goal(armed)
             duel["auto"] = {"t": "win", "slot": actor["slot"], "aid": armed.id}
             duel["zone_extra"] = armed.zone_extra
             if armed.puppet and action == "pass" and duel.get("target") is not None:
@@ -450,6 +459,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             abilities.note(state, actor["name"], armed, icon=abilities.icon_for(armed))
         elif armed.gamble:
             abilities.spend_armed(state, actor["slot"])
+            _stash_goal(armed)
             duel["gamble"] = True
             duel["gamble_min"] = armed.gamble_min
             duel["gamble_aid"] = armed.id
@@ -465,6 +475,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                 val = bound_bonus(armed, ctx_att, val)
             if val or armed.save_self or armed.die_floor or armed.tie_win:
                 abilities.spend_armed(state, actor["slot"])
+                _stash_goal(armed)
                 if val:
                     val = bound_bonus(armed, ctx_att, val)
                     duel["att_power"] += val
@@ -616,6 +627,7 @@ def cancel_duel(match_id: int) -> None:
     # an abandoned duel must not leave its payout behind for the next action
     state.pop("pending_buff", None)
     state.pop("pending_beats", None)
+    state.pop("pending_goal", None)
     _drop_auto_armed(state)
     db.update_match(match_id, phase="play", pending=json.dumps(state))
 
@@ -1048,6 +1060,22 @@ def resolve(match_id: int) -> dict | None:
             s for s in state.get("streaks", [])
             if s.get("kind") != "reward" and s.get("slot") != actor["slot"]
         ]
+        # Passive goal payout (Taha's "اگ گل شد ... میگیره"): owed to the owner
+        # once his team scores. Granted AFTER the sweep so it survives this goal
+        # and the next one wipes it. The pending is dropped either way.
+        pg = state.pop("pending_goal", None)
+        if pg:
+            _owner = by_slot.get(pg.get("owner"))
+            if _owner is not None and _owner["team"] == actor["team"]:
+                if pg.get("self_amt"):
+                    grant_streak(state, pg["owner"], pg["self_amt"],
+                                 pg.get("src", ""), kind="reward")
+                if pg.get("mate_amt"):
+                    _mate = (state.get("last_pass")
+                             if pg.get("owner") == actor["slot"] else actor["slot"])
+                    if _mate is not None and _mate != pg.get("owner"):
+                        grant_streak(state, _mate, pg["mate_amt"],
+                                     pg.get("src", ""), kind="reward")
         db.bump_slot(match_id, actor["slot"], goals=1)
         assist_slot = state.get("last_pass")
         if assist_slot is not None and assist_slot != actor["slot"]:

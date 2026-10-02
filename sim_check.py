@@ -1430,5 +1430,34 @@ for uid, aid, ch, ruid, bname, a_amt, b_amt in (
     assert aid in st.get("used", []), (bname, "one use — the charge still burns")
 print("ok  Winning Movement / French Pass: receiver buff lands even though the charge burns")
 
+# S19: the goal payout SPANS actions — Sae's pass sets up a goal that only
+# lands on a later action (Taha: "اگ گل زد که یارش و خود سا مثبت 1 میگیرن")
+mG2 = build_match([(fresh, def_u), (rin_u, def_u2)])
+sS2, rS2 = slot_of(mG2, fresh), slot_of(mG2, rin_u)
+for _x in abilities.starter_ids("sae"):
+    db.grant_unlock(fresh, _x)
+stage(mG2, sS2, zone=0)
+do_arm(mG2, sS2, "sae_p1")
+opened = engine.open_duel(mG2, "pass", rS2)
+out = roll_and_resolve(mG2, att=6, dfn=1)
+assert out["outcome"] == "pass_ok", out
+st = engine.pending_of(db.match(mG2))
+assert st.get("pending_goal", {}).get("owner") == sS2, st.get("pending_goal")
+# the receiver scores one action later (a penalty keeps it deterministic)
+st.update({"zone": ZONE_BOX, "set_piece": "penalty", "beaten": []})
+db.update_match(mG2, pending=json.dumps(st), phase="opening", holder=rS2)
+assert "error" not in engine.open_duel(mG2, "penalty", None)
+assert engine.submit_spot(mG2, rin_u, "left")["status"] == "ok"
+assert engine.submit_spot(mG2, def_u, "right")["status"] == "ok"
+out = engine.resolve(mG2)
+assert out["outcome"] == "goal", out
+st = engine.pending_of(db.match(mG2))
+assert "pending_goal" not in st, "the payout is consumed by the goal"
+paid = [(s["slot"], s["amt"], s["src"]) for s in st.get("streaks", [])
+        if s.get("kind") == "reward" and (s.get("amt") or 0) > 0]
+assert (sS2, 1, "sae_p1") in paid, ("Sae is owed +1", paid)
+assert (rS2, 1, "sae_p1") in paid, ("the scorer is owed +1", paid)
+print("ok  goal payout spans actions: Sae's pass -> later goal -> both take +1")
+
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

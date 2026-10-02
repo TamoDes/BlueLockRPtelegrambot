@@ -332,9 +332,11 @@ def register_extras() -> None:
     ])
     _register("knight", [
         Ability("knight_p1", "knight", "passive", 1, "Knight Defense / Knight Sword",
-            "+2 defending against a dribble; +1 on his dribble, +2 on his shot.",
+            "+2 defending against a dribble; +1 on his dribble, +2 on his shot; "
+            "+2 more if he scores.",
             dfd=lambda c: 2 if c["action"] == "dribble" else 0,
-            att=lambda c: 1 if c["action"] == "dribble" else (2 if c["action"] == "shoot" else 0)),
+            att=lambda c: 1 if c["action"] == "dribble" else (2 if c["action"] == "shoot" else 0),
+            goal_self=2),
         Ability("knight_s1", "knight", "skill", 1, "Complete Striker",
             "Beats his marker with no roll and lands one zone forward.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble"),
@@ -366,8 +368,9 @@ def register_extras() -> None:
     ])
     _register("lavinho", [
         Ability("lavinho_p1", "lavinho", "passive", 1, "Dance",
-            "+3 on his dribble.",
-            att=lambda c: 3 if c["action"] == "dribble" else 0),
+            "+3 on his dribble; +2 more if the move ends in a goal.",
+            att=lambda c: 3 if c["action"] == "dribble" else 0,
+            goal_self=2),
         Ability("lavinho_s1", "lavinho", "skill", 1, "Elastica",
             "Beats his marker with no roll and lands one zone forward.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble"),

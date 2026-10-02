@@ -143,6 +143,12 @@ class Ability:
     # Applied at the end of resolve() (after any goal the shot scored), so the
     # debuff survives the goal it was dealt on — Taha: "تا گل بعدی".
     beats: int = 0
+    # Goal payout (Taha's "اگ گل شد ... میگیره"): stashed when the passive
+    # fires, paid at the NEXT goal by the owner's team, then cleared. `self` is
+    # for the owner; `mate` for the other party of the move (the assister when
+    # he scored, the scorer when he assisted).
+    goal_self: int = 0
+    goal_mate: int = 0
     aura_gk: int = 0
     gamble: bool = False
     gamble_min: int = 0
@@ -402,8 +408,10 @@ _KITS = [
     ]),
     ("sae", [
         _reg(Ability("sae_p1", "sae", "passive", 1, "Winning Movement",
-            "+2 on his pass; the receiver's next action +2.",
+            "+2 on his pass; the receiver's next action +2. If a goal follows, "
+            "Sae and the scorer each take +1.",
             att=lambda c: 2 if c["action"] == "pass" else 0, pass_buff=2,
+            goal_self=1, goal_mate=1,
             when=lambda c: c["action"] == "pass")),
         _reg(Ability("sae_s1", "sae", "skill", 1, "Maestro's Through Ball",
             "Completed pass gives the receiver +2 next action.",
@@ -418,10 +426,11 @@ _KITS = [
     ]),
     ("kaiser", [
         _reg(Ability("kaiser_p1", "kaiser", "passive", 1, "Emperor",
-            "+1 on his dribble, +2 on his shot. Everyone he shots past takes -1 until the next goal.",
+            "+1 on his dribble, +2 on his shot. Everyone he shots past takes -1 "
+            "until the next goal, and a goal pays him +2.",
             att=lambda c: 1 if c["action"] == "dribble" else (2 if c["action"] == "shoot" else 0),
             when=lambda c: c["action"] in ("dribble", "shoot"),
-            beats=-1)),
+            beats=-1, goal_self=2)),
         _reg(Ability("kaiser_s1", "kaiser", "skill", 1, "Emperor's Draw",
             "Lost field duel → his team wins the set piece.",
             on_lost="foul")),
@@ -463,8 +472,9 @@ _KITS = [
     # ---------------------------------------------------------------- SR
     ("barou", [
         _reg(Ability("barou_p1", "barou", "passive", 1, "Hungry G Point",
-            "+2 Shot right after receiving a pass.",
-            att=lambda c: 2 if c["action"] == "shoot" and _after_pass(c) else 0)),
+            "+2 Shot right after receiving a pass; +1 more if it goes in.",
+            att=lambda c: 2 if c["action"] == "shoot" and _after_pass(c) else 0,
+            goal_self=1)),
         _reg(Ability("barou_s1", "barou", "skill", 1, "Predator Tackle",
             "While marking: wins the ball with no roll.",
             auto="stop")),
@@ -491,8 +501,9 @@ _KITS = [
     ]),
     ("bachira", [
         _reg(Ability("bachira_p1", "bachira", "passive", 1, "Monster Moment",
-            "+2 on his dribble.",
-            att=lambda c: 2 if c["action"] == "dribble" else 0)),
+            "+2 on his dribble; +2 more if a goal follows.",
+            att=lambda c: 2 if c["action"] == "dribble" else 0,
+            goal_self=2)),
         _reg(Ability("bachira_s1", "bachira", "skill", 1, "Monster Time",
             "Beats his marker with no roll + one extra zone.",
             auto="win", zone_extra=1, when=lambda c: c["action"] == "dribble")),
@@ -577,8 +588,9 @@ _KITS = [
     ]),
     ("kunigami", [
         _reg(Ability("kunigami_p1", "kunigami", "passive", 1, "Long Shot",
-            "+3 on his shot.",
-            att=lambda c: 3 if c["action"] == "shoot" else 0)),
+            "+3 on his shot; +1 more if it goes in.",
+            att=lambda c: 3 if c["action"] == "shoot" else 0,
+            goal_self=1)),
         _reg(Ability("kunigami_s1", "kunigami", "skill", 1, "Wild Card Volley",
             "Next action of any teammate +2; his own shot +1.",
             pass_buff=2, att=lambda c: 1 if c["action"] == "shoot" else 0)),
