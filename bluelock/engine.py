@@ -506,6 +506,10 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                         duel["through_extra"] = _tw[armed.through:]
                     else:
                         duel["through"] = armed.through
+                if armed.sure_goal:
+                    # he already read the field: nothing between him and goal
+                    duel["auto"] = {"t": "win", "slot": actor["slot"], "aid": armed.id}
+                    duel["sure_goal"] = True
                 # Sae / Charles carry an attack bonus AND a receiver buff. The
                 # bonus lands here and burns the charge, so the receiver buff
                 # would find nothing in resolve() — stash it for the completed pass.
@@ -1319,6 +1323,9 @@ def resolve(match_id: int) -> dict | None:
         if not won and margin and att_t >= eff_gk_total - margin:
             won = True
             out["margin_goal"] = margin
+        if duel.get("sure_goal"):
+            won = True
+            out["sure_goal"] = True
         if won:
             score_goal()
         else:

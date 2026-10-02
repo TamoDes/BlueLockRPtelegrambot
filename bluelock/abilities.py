@@ -143,6 +143,9 @@ class Ability:
     # Applied at the end of resolve() (after any goal he scored), so the
     # debuff survives the goal it was dealt on — Taha: "تا گل بعدی".
     beats: int = 0
+    # Isagi's Last Puzzle: he has already read the field and got on the end of
+    # it — the wall cannot stop him and the keeper cannot save it.
+    sure_goal: bool = False
     # Hugo's Phantom Call: he throws three dice and calls one of them real. The
     # defender must name the called die — a right call means a normal contest,
     # a wrong call gives the pass/shot away outright (Taha: "گارانتی رد یا گل").
@@ -385,8 +388,10 @@ _KITS = [
     # ---------------------------------------------------------------- SSR
     ("isagi", [
         _reg(Ability("isagi_p1", "isagi", "passive", 1, "Last Puzzle",
-            "+2 Shot once a defender has been beaten this attack.",
-            att=lambda c: 2 if c["action"] == "shoot" and c["beaten_n"] >= 1 else 0)),
+            "Reads the field and gets on the end of it: the pass line is beaten, "
+            "the keeper cannot save it, and he takes +2. Works off a loose ball too.",
+            att=lambda c: 2 if c["action"] == "shoot" else 0, sure_goal=True,
+            when=lambda c: c["action"] == "shoot")),
         _reg(Ability("isagi_s1", "isagi", "skill", 1, "Meta Vision Read",
             "While marking: intercept an opponent pass with no roll.",
             auto="stop", when=lambda c: c["action"] == "pass")),

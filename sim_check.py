@@ -701,28 +701,29 @@ engine.cancel_duel(mid)
 assert engine.arm_skill(mid, rin_u, "rin_p1")["status"] == "spent"
 print("ok  passives fire on their own: one charge per match, tagged on the duel line")
 
-# S2: Last Puzzle (+2 Shot once a defender is beaten) — condition checked at resolution, not blindly.
+# S2: Last Puzzle — he reads it, gets on the end of it and finishes. Only a
+# shot makes him move; anything else leaves the charge untouched.
 isagi_slot = slot_of(mid, isagi_u)
 dslot = slot_of(mid, def_u2)
 base_sho = characters.base_stats("isagi")["shot"]
 arm_stage(mid, isagi_slot, "isagi_p1", zone=ZONE_SHOOT, beaten=[])
-opened = engine.open_duel(mid, "shoot", None)  # no one beaten yet → no boost
-assert opened["duel"]["att_power"] == base_sho, "condition not met — no boost, charge stays"
+opened = engine.open_duel(mid, "dribble", None)   # not a shot — he doesn't read it
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
-assert "isagi_p1" not in st.get("used", []), "armed but unspent condition must stay charged"
+assert "isagi_p1" not in st.get("used", []), "not a shot — the charge must stay"
 stage(mid, isagi_slot, zone=ZONE_SHOOT, beaten=[dslot])
 do_arm(mid, isagi_slot, "isagi_p1")
-opened = engine.open_duel(mid, "shoot", None)  # line broken → boost fires
+opened = engine.open_duel(mid, "shoot", None)
 assert opened["duel"]["att_power"] == base_sho + 2
 assert opened["duel"]["att_boosts"] == [("Last Puzzle", 2)]
+assert opened["duel"].get("sure_goal"), "and once he's on the end of it, it cannot be saved"
 engine.cancel_duel(mid)
 stage(mid, isagi_slot, zone=ZONE_SHOOT, beaten=[])
 do_arm(mid, isagi_slot, "isagi_p1")
 opened = engine.open_duel(mid, "shoot", None)
-assert opened["duel"]["att_power"] == base_sho, "no beaten defender — no boost"
+assert opened["duel"]["att_power"] == base_sho + 2, "loose ball / nobody beaten — he still reads it"
 engine.cancel_duel(mid)
-print("ok  Last Puzzle fires only once the line is broken (no beaten defender → no boost, charge kept)")
+print("ok  Last Puzzle: a shot always converts (+2, unsaveable); any other action keeps the charge")
 
 # S3: Impossible Trap must be ARMED; then auto-wins once and is spent
 nagi_u = make_user("nagi")
@@ -1523,6 +1524,20 @@ assert not engine.ready(db.match(mH2)), "the contest still needs its dice"
 out = roll_and_resolve(mH2, att=1, dfn=6)
 assert out["outcome"] != "pass_ok", out   # a right call really can cost him
 print("ok  Phantom Call: right call -> they compete and he can lose")
+
+# S23: Last Puzzle — he read it, he got there, and a die-6 keeper still can't save it
+mI = build_match([(isagi_u, def_u), (rin_u, def_u2)])
+sI = slot_of(mI, isagi_u)
+stage(mI, sI, zone=1)
+do_arm(mI, sI, "isagi_p1")
+engine.open_duel(mI, "shoot", None)
+stI = engine.pending_of(db.match(mI))
+assert stI["duel"].get("sure_goal"), stI["duel"].get("auto")
+assert stI["duel"].get("auto", {}).get("t") == "win", stI["duel"].get("auto")
+out = roll_and_resolve(mI, att=1, gk=6)
+assert out["outcome"] == "goal", out
+assert out.get("sure_goal"), out
+print("ok  Last Puzzle: a die-1 shot past a die-6 keeper still goes in")
 
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")
