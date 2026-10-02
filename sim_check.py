@@ -1384,5 +1384,29 @@ print("ok  Rin PUPPET: guaranteed pass → forced dribble → reclaim + streaks"
 
 db.set_setting(config.SEASON_PHASE_KEY, "live")
 
+# S17: EMPEROR — everyone Kaiser shot past takes -1 until the next goal
+mK = build_match([(kaiser_u, def_u), (rin_u, def_u2)])
+ks = slot_of(mK, kaiser_u)
+# the season-wipe test above emptied everyone's unlocks — restore the starters
+for _aid in abilities.starter_ids("kaiser"):
+    db.grant_unlock(kaiser_u, _aid)
+kbase = characters.base_stats("kaiser")
+stage(mK, ks, zone=ZONE_SHOOT, beaten=[])
+do_arm(mK, ks, "kaiser_p1")
+opened = engine.open_duel(mK, "shoot", None)
+assert opened["duel"]["att_power"] == kbase["shot"] + 2, (
+    "Emperor adds +2 on his shot", opened["duel"]["att_power"])
+out = roll_and_resolve(mK, att=6, dfn=1, gk=1)
+assert out["outcome"] == "goal", ("shot must go in to prove the ordering", out["outcome"])
+st = engine.pending_of(db.match(mK))
+minus = [s for s in st.get("streaks", []) if (s.get("amt") or 0) < 0]
+assert minus, ("everyone Kaiser shot past must take -1", st.get("streaks"))
+assert all(s["src"] == "kaiser_p1" for s in minus), minus
+assert all(s["kind"] == "reward" for s in minus), minus
+assert ks not in {s["slot"] for s in minus}, "Kaiser never debuffs himself"
+# the payout runs AFTER score_goal(), so the -1 survives the goal the shot
+# scored; kind=reward means the NEXT goal (any side) wipes it — see S15.
+print("ok  Emperor: shot beats the wall -> everyone beaten takes -1, survives its own goal")
+
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

@@ -469,6 +469,10 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                     val = bound_bonus(armed, ctx_att, val)
                     duel["att_power"] += val
                     duel["att_boosts"].append((armed.name, val))
+                # resolve() pays out `beats` AFTER the shot is judged (and after
+                # any goal it scored) — stash it so the spent charge still counts.
+                if armed.beats and action == "shoot":
+                    state["pending_beats"] = {"amt": armed.beats, "src": armed.id}
                 if armed.gk_down:
                     duel["gk_down"] = armed.gk_down
                 if armed.save_margin:
@@ -1285,6 +1289,20 @@ def resolve(match_id: int) -> dict | None:
     if action == "dribble" and state.get("puppet", {}).get("stage") == "await_action" \
             and actor["slot"] == state["puppet"].get("mate"):
         puppet_take(min(ZONE_BOX, zone + 1))
+
+    # --- Emperor (Kaiser): everyone he shot past takes -1 until the next goal.
+    # Paid out HERE — after any goal the shot just scored — so the debuff is
+    # dealt on the goal and survives it (Taha: "تا گل بعدی", any goal clears it).
+    pb = state.pop("pending_beats", None)
+    if pb and wall_beaten:
+        _pb_ab = abilities.get(pb.get("src", ""))
+        _targets = [s for s in wall_beaten if s != actor["slot"]]
+        for _slot in _targets:
+            grant_streak(state, _slot, pb["amt"], pb.get("src", ""), kind="reward")
+        if _pb_ab and _targets:
+            abilities.note(state, actor["name"], _pb_ab,
+                           f"{len(_targets)} beaten → {pb['amt']} until the next goal",
+                           icon="👑")
 
     state["beaten"] = beaten
     out["beaten"] = beaten

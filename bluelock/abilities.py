@@ -139,6 +139,10 @@ class Ability:
     pen_autoscore: bool = False
     tie_win: bool = False
     pass_buff: int = 0
+    # Every player the actor shot PAST takes this amount until the next goal.
+    # Applied at the end of resolve() (after any goal the shot scored), so the
+    # debuff survives the goal it was dealt on — Taha: "تا گل بعدی".
+    beats: int = 0
     aura_gk: int = 0
     gamble: bool = False
     gamble_min: int = 0
@@ -414,9 +418,10 @@ _KITS = [
     ]),
     ("kaiser", [
         _reg(Ability("kaiser_p1", "kaiser", "passive", 1, "Emperor",
-            "+1 on his dribble, +2 on his shot.",
+            "+1 on his dribble, +2 on his shot. Everyone he shots past takes -1 until the next goal.",
             att=lambda c: 1 if c["action"] == "dribble" else (2 if c["action"] == "shoot" else 0),
-            when=lambda c: c["action"] in ("dribble", "shoot"))),
+            when=lambda c: c["action"] in ("dribble", "shoot"),
+            beats=-1)),
         _reg(Ability("kaiser_s1", "kaiser", "skill", 1, "Emperor's Draw",
             "Lost field duel → his team wins the set piece.",
             on_lost="foul")),
