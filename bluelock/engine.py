@@ -473,6 +473,12 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                 # any goal it scored) — stash it so the spent charge still counts.
                 if armed.beats and action == "shoot":
                     state["pending_beats"] = {"amt": armed.beats, "src": armed.id}
+                # Sae / Charles carry an attack bonus AND a receiver buff. The
+                # bonus lands here and burns the charge, so the receiver buff
+                # would find nothing in resolve() — stash it for the completed pass.
+                if armed.pass_buff and action in ("pass", "cross") and duel.get("target") is not None:
+                    state["pending_buff"] = {"amt": armed.pass_buff, "src": armed.id,
+                                             "target": duel["target"]}
                 if armed.gk_down:
                     duel["gk_down"] = armed.gk_down
                 if armed.save_margin:
@@ -607,6 +613,9 @@ def cancel_duel(match_id: int) -> None:
     state = pending_of(match)
     state.pop("duel", None)
     state.pop("notes", None)
+    # an abandoned duel must not leave its payout behind for the next action
+    state.pop("pending_buff", None)
+    state.pop("pending_beats", None)
     _drop_auto_armed(state)
     db.update_match(match_id, phase="play", pending=json.dumps(state))
 
@@ -905,6 +914,10 @@ def resolve(match_id: int) -> dict | None:
     defender = by_slot.get(duel["defender"]) if duel["defender"] is not None else None
     action = duel["action"]
     was_set_piece = action in SET_PIECES
+    # Stashed by open_duel() when the passive burns its charge there (attack
+    # bonus + receiver buff in one ability, e.g. Sae / Charles). Popped right
+    # away so an incomplete pass drops it instead of leaking to a later action.
+    pbuff = state.pop("pending_buff", None)
 
     _seen_boosts = {(b[0], b[1]) for b in duel.get("def_boosts", [])}
     for slot in ([duel["defender"]] if duel.get("defender") is not None else []) + (duel.get("wall") or []):
@@ -1261,7 +1274,12 @@ def resolve(match_id: int) -> dict | None:
                     # no room for the forced dribble — the pull happens on the spot
                     puppet_take(state["zone"], keep_outcome=True)
             buff_ab = abilities.peek_armed(state, actor["slot"])
-            if buff_ab is not None and buff_ab.pass_buff:
+            if pbuff is not None:
+                # charge already burned in open_duel — pay the stashed buff
+                _pab = abilities.get(pbuff.get("src", ""))
+                if _pab is not None:
+                    grant_buff(pbuff["target"], bound_bonus(_pab, {"self": actor, "roster": roster}, pbuff["amt"]), _pab)
+            elif buff_ab is not None and buff_ab.pass_buff:
                 abilities.spend_armed(state, actor["slot"])
                 grant_buff(duel["target"], bound_bonus(buff_ab, {"self": actor, "roster": roster}, buff_ab.pass_buff), buff_ab)
             if buff_ab is not None and buff_ab.pass_advance:
@@ -1275,7 +1293,11 @@ def resolve(match_id: int) -> dict | None:
             state["last_pass"] = actor["slot"]
             new_holder = duel["target"]
             buff_ab = abilities.peek_armed(state, actor["slot"])
-            if buff_ab is not None and buff_ab.pass_buff:
+            if pbuff is not None:
+                _pab = abilities.get(pbuff.get("src", ""))
+                if _pab is not None:
+                    grant_buff(pbuff["target"], bound_bonus(_pab, {"self": actor, "roster": roster}, pbuff["amt"]), _pab)
+            elif buff_ab is not None and buff_ab.pass_buff:
                 abilities.spend_armed(state, actor["slot"])
                 grant_buff(duel["target"], bound_bonus(buff_ab, {"self": actor, "roster": roster}, buff_ab.pass_buff), buff_ab)
         else:

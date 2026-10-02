@@ -1408,5 +1408,27 @@ assert ks not in {s["slot"] for s in minus}, "Kaiser never debuffs himself"
 # scored; kind=reward means the NEXT goal (any side) wipes it — see S15.
 print("ok  Emperor: shot beats the wall -> everyone beaten takes -1, survives its own goal")
 
+# S18: Sae / Charles — the attack bonus burns the charge, yet the receiver
+# buff must STILL land (resolve() used to find an empty armed slot and skip it)
+for uid, aid, ch, ruid, bname, a_amt, b_amt in (
+        (fresh, "sae_p1", "sae", rin_u, "Winning Movement", 2, 2),
+        (new_users["charles"], "charles_p1", "charles", isagi_u, "French Pass", 2, 1)):
+    m = build_match([(uid, def_u), (ruid, def_u2)])
+    ss, rr = slot_of(m, uid), slot_of(m, ruid)
+    for _x in abilities.starter_ids(ch):
+        db.grant_unlock(uid, _x)
+    stage(m, ss, zone=0)
+    do_arm(m, ss, aid)
+    opened = engine.open_duel(m, "pass", rr)
+    assert (bname, a_amt) in opened["duel"]["att_boosts"], (bname, opened["duel"]["att_boosts"])
+    out = roll_and_resolve(m, att=6, dfn=1)
+    assert out["outcome"] == "pass_ok", out
+    st = engine.pending_of(db.match(m))
+    got = [b for b in st.get("buffs", []) if b["slot"] == rr]
+    assert got, (bname, "receiver must get his buff", st.get("buffs"))
+    assert got[0]["amt"] == b_amt, (bname, got)
+    assert aid in st.get("used", []), (bname, "one use — the charge still burns")
+print("ok  Winning Movement / French Pass: receiver buff lands even though the charge burns")
+
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")
