@@ -36,7 +36,15 @@ ADMIN_IDS = {
     if part.strip().isdigit()
 }
 
-SEASON = int(os.environ.get("BLUELOCK_SEASON", "1"))
+def _int_env(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+SEASON = _int_env("BLUELOCK_SEASON", 1)
 
 # active season phase: 'test' (sandbox, no yen/xp) or 'live' — set from the admin
 # panel, persisted in the settings table, read fresh on every payout.
