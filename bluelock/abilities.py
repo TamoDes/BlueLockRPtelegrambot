@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -18,12 +20,97 @@ SET_PIECES = ("freekick", "penalty")
 PASSIVE_ICON = "🛡"
 SKILL_ICON = "⚡"
 
-PASSIVE_CHARGES = 2
+PASSIVE_CHARGES = 1  # every passive fires ONCE per match (free, one-shot)
 
 
 def enabled() -> bool:
     from . import config
     return bool(getattr(config, "ABILITIES_ENABLED", True))
+
+
+@dataclass(frozen=True)
+class PassiveDef:
+    """
+    One-time-per-match passive effect, free for all characters.
+
+    trigger : what game event fires this passive.
+    effect  : what the passive does when it fires.
+
+    Triggers:
+      on_pass        — fires after a successful completed pass by this char
+      on_dribble     — fires after a successful dribble (actor beat defender)
+      on_shot        — fires just before the shot resolution roll
+      on_miss        — fires after a missed shot / save
+      on_goal        — fires after this char scores
+      on_assist      — fires after this char makes an assist
+      on_steal       — fires after this char wins a tackle / intercept
+      on_pos         — fires every turn: the char is in the right spot
+
+    Effects resolve in order.  "guaranteed_*" effects bypass normal rolls.
+    """
+    trigger: str          # e.g. "on_pass"
+    desc_extra: str = ""  # shown in profile/kit page next to the passive name
+
+    # who receives the buff/stack (None = self, "last_pass" = pass receiver)
+    buff_receiver: str | None = None
+    buff_amount: int = 0
+
+    # extra dice: add this many extra dice to the triggering action
+    extra_dice: int = 0
+
+    # stack: add this many temp dice to the *next* shot by this char (persists)
+    stack_next_shot: int = 0
+
+    # guaranteed outcomes (bypass all rolls, GK has zero chance)
+    guaranteed_dribble: bool = False  # beat marker with no roll
+    guaranteed_shot: bool = False     # shot bypasses keeper roll entirely
+    guaranteed_goal: bool = False     # instant goal, no keeper
+    guaranteed_pass: bool = False     # pass can't be intercepted
+    guaranteed_steal: bool = False    # tackle wins with no roll
+
+    # fake wall: pick N dice to discard after seeing the pool
+    fake_wall_dice: int = 0
+
+    # on_miss recovery: when shot misses, who gets the loose ball
+    miss_loose_to: str | None = None  # "self" | "team" | "any"
+
+    # position-swap: swap slot with another on the trigger
+    swap_with_slot: int | None = None
+    swap_if_unmarked: bool = False    # only swap if currently unmarked
+
+    # ── Bound system ─────────────────────────────────────────────────────────────
+    bound_type: str | None = None      # "bound" = only works when bound+same-team | None = always
+    bound_tier: int = 1                # 1=basic, 2=mid, 3=full. evolves with level-up purchase.
+
+    # ── Target ──────────────────────────────────────────────────────────────────
+    target_is_defender: bool = False   # if True, buffs go to the DEFENDER instead of actor
+    target_is_teammate: bool = False    # if True, buffs go to the teammate in front
+    teammate_approaching: bool = False # passive fires when a teammate with ball is approaching actor
+
+    # ── Temp buffs (one-action duration) ───────────────────────────────────────
+    temp_buff_to_actor: int = 0        # buff to actor's next action only
+    temp_buff_to_defender: int = 0     # debuff to defender (negative = debuff)
+
+    # ── Conditional triggers ────────────────────────────────────────────────────
+    requires_ball_loose: bool = False  # only fires when ball is loose (not held)
+    requires_teammate_in_front: bool = False  # only fires if teammate is ahead in attack direction
+    on_my_turn_start: bool = False    # fires at start of actor's turn (on_pos trigger)
+    on_ball_loose: bool = False        # fires when ball becomes loose
+    on_pass_incoming: bool = False     # fires when a pass toward actor is in-flight
+    on_teammate_approaching: bool = False  # fires when teammate with ball is nearby
+    on_defender_guess: bool = False    # fires when defender is about to guess
+    on_match_end: bool = False         # fires at match end
+    on_goal_scored: bool = False       # fires when a goal is scored (any char)
+
+    # ── Special effects ────────────────────────────────────────────────────────
+    no_keeper_luck: bool = False       # keeper cannot get lucky on this passive's guaranteed_* effects
+    wrong_guess_guaranteed: bool = False  # if opponent guesses wrong, guaranteed pass/goal
+    guess_three_dice: bool = False     # Hogo-style: 3 dice, 1 real + 1 fake, defender picks
+    multi_target_pass: int = 0         # pass through N opponents with bonus
+    multi_target_dribble: int = 0      # dribble through N opponents with bonus
+    multi_target_shot: int = 0         # shoot through N opponents with bonus
+    chain_bonus: int = 0               # bonus if ball was already advanced N zones
+    guaranteed_if_keeper_miss: bool = False  # if keeper rolls 1-2, guaranteed goal
 
 
 @dataclass(frozen=True)
@@ -56,6 +143,154 @@ class Ability:
     long_shot: bool = False
     pass_advance: int = 0
     first_free: bool = False
+    passive: "PassiveDef | None" = None
+    # ── Bound ─────────────────────────────────────────────────────────────────
+    # bound=True: this ability only works while the owner's Bound partner is on
+    # the SAME team in this match (position/adjacency irrelevant). A one-way
+    # bound (BUFF) keeps BOTH sides inactive. Numeric effects grow with the
+    # Bound tier: +(tier - 1), tier 1 → +0, tier 2 → +1, tier 3 → +2.
+    bound: bool = False
+
+    # ── Passive resolver ─────────────────────────────────────────────────────────
+
+    def resolve_passive(
+        trigger: str,
+        actor: dict,
+        ctx: dict,
+        state: dict,
+        out: dict,
+    ) -> None:
+        """
+        Check every passive on `actor` that matches `trigger` and apply effects.
+
+        Hook this at key moments in resolve_action():
+          - on_pass   : after pass completes (actor just passed)
+          - on_dribble: after dribble resolves (actor beat defender)
+          - on_shot   : before shot roll (actor is shooter)
+          - on_miss   : after shot is saved / punched
+          - on_goal   : after goal is scored (actor is scorer)
+          - on_assist : after goal where actor was the passer
+          - on_steal  : after actor wins a tackle/intercept
+        """
+        row = ctx["self"]
+        uid = row.get("user_id")
+        if uid is None:
+            return
+
+        for ab in _passives_of(uid, row["char_key"]):
+            p = ab.passive
+            if p is None:
+                continue
+            if p.trigger != trigger:
+                continue
+            if not _passive_usable(state, ab):
+                continue
+
+            # ── apply effects ──────────────────────────────────────────
+            _apply_passive(p, actor, ctx, state, out)
+
+            # mark as used (one-time per match)
+            _spend_passive(state, ab)
+
+
+    def _apply_passive(p: PassiveDef, actor: dict, ctx: dict, state: dict, out: dict) -> None:
+        """Apply all effects of one PassiveDef."""
+        notes: list[str] = []
+        note = lambda msg: notes.append(msg)
+
+        if p.guaranteed_dribble:
+            out["passive_guaranteed_dribble"] = True
+            note(f"🛡 {actor['name']} — guaranteed dribble")
+
+        if p.guaranteed_pass:
+            out.setdefault("passive_guaranteed", []).append("pass")
+            note(f"✨ {actor['name']} — guaranteed pass")
+
+        if p.guaranteed_steal:
+            out["passive_guaranteed_steal"] = True
+            note(f"🛡 {actor['name']} — guaranteed steal")
+
+        if p.extra_dice:
+            out["passive_extra_dice"] = out.get("passive_extra_dice", 0) + p.extra_dice
+            note(f"🎲 {actor['name']} — +{p.extra_dice} dice")
+
+        if p.stack_next_shot:
+            state.setdefault("passive_stacks", {})[actor["slot"]] = (
+                state["passive_stacks"].get(actor["slot"], 0) + p.stack_next_shot
+            )
+            note(f"⬆️  {actor['name']} — +{p.stack_next_shot} next shot")
+
+        if p.guaranteed_shot:
+            out["passive_guaranteed_shot"] = True
+            note(f"⚽ {actor['name']} — guaranteed shot")
+
+        if p.guaranteed_goal:
+            out["passive_guaranteed_goal"] = True
+            note(f"🏆 {actor['name']} — guaranteed goal")
+
+        if p.fake_wall_dice:
+            out["passive_fake_wall"] = out.get("passive_fake_wall", 0) + p.fake_wall_dice
+            note(f"🎭 {actor['name']} — fake wall ×{p.fake_wall_dice}")
+
+        if p.buff_amount:
+            target_slot = _buff_target(p, actor, ctx, out)
+            _grant_passive_buff(target_slot, p.buff_amount, actor, state)
+            note(f"✨ {actor['name']} → +{p.buff_amount} [{p.buff_receiver or 'self'}]")
+
+        if p.swap_with_slot is not None:
+            out["passive_swap_slot"] = p.swap_with_slot
+            out["passive_swap_if_unmarked"] = p.swap_if_unmarked
+            note(f"🔄 {actor['name']} — position swap")
+
+        if notes:
+            state.setdefault("notes", []).extend(notes)
+
+
+    def _buff_target(p: PassiveDef, actor: dict, ctx: dict, out: dict) -> int:
+        """Resolve who receives the passive buff."""
+        if p.buff_receiver == "last_pass":
+            slot = out.get("receiver", {}).get("slot")
+            if slot is None:
+                slot = state.get("last_pass")
+            return slot if slot is not None else actor["slot"]
+        return actor["slot"]
+
+
+    def _grant_passive_buff(slot: int, amount: int, actor: dict, state: dict) -> None:
+        state.setdefault("buffs", []).append({
+            "slot": slot,
+            "amt": amount,
+            "src": "passive",
+            "from": actor["name"],
+            "temp": True,   # consumed after one action
+        })
+
+
+    # ── helpers ──────────────────────────────────────────────────────────────────
+
+    def _passives_of(uid: int, char_key: str) -> list[Ability]:
+        """Return passive Abilities owned by this user for this character."""
+        if not enabled():
+            return []
+        ids = owned_ids(uid, char_key)
+        return [get(aid) for aid in ids if aid and get(aid).kind == "passive" and get(aid).passive is not None]
+
+    def _passive_usable(state: dict, ab: Ability) -> bool:
+        if ab is None or ab.passive is None:
+            return False
+        used: list = state.setdefault("passive_used", [])
+        if ab.id in used:
+            return False
+        return True
+
+    def _spend_passive(state: dict, ab: Ability) -> None:
+        state.setdefault("passive_used", []).append(ab.id)
+
+
+    def reset_passive_state(state: dict) -> None:
+        """Called at match start — no extra reset needed (passive_used = [] in new state)."""
+        state.setdefault("passive_used", [])
+        state.setdefault("passive_stacks", {})
 
 
 def _losing(c):
@@ -542,6 +777,14 @@ from .abilities_extra import register_extras as _register_extras
 
 _register_extras()
 
+from .abilities_roster import register_extras as _register_roster
+
+_register_roster()
+
+from .abilities_bound import register_extras as _register_bound
+
+_register_bound()
+
 
 CATEGORIES = (
     "gamble",
@@ -726,6 +969,7 @@ def build_ctx(match, roster, self_row, other_row, action: str, zone: int, state:
         "last_pass": state.get("last_pass"),
         "self": self_row,
         "other": other_row,
+        "roster": roster,
         "mates": mates,
         "foes": foes,
         "foe_rarities": foe_rarities,

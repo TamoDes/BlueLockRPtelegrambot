@@ -46,7 +46,7 @@ ROSTER = {
     "hiori":      ("Yo Hiori",          "SR",  (3, 6, 5, 3, 3), "Quiet Shadow"),
     "sendo":      ("Shuto Sendo",       "R",   (5, 3, 3, 3, 2), "Wing Forward"),
     "kurona":     ("Ranze Kurona",      "R",   (2, 5, 5, 3, 2), "The Apprentice"),
-    "tsurugi":    ("Zantetsu Tsurugi",  "R",   (5, 2, 5, 3, 2), "Sharp Shooter"),
+    # "tsurugi" removed: duplicate of "zantetsu" (same character, canonical key = zantetsu)
     "fukaku":     ("Gen Fukaku",        "N",   (1, 3, 2, 6, 1), "Defensive Specialist"),
     "raichi":     ("Jingo Raichi",      "R",   (3, 3, 3, 6, 2), "Rage"),
     "kiyora":     ("Jin Kiyora",        "R",   (5, 3, 5, 3, 3), "Midfield Maestro"),
@@ -54,6 +54,16 @@ ROSTER = {
 
     # ── Other Blue Lock players ─────────────────────────────────────────────
     "nagi":       ("Seishiro Nagi",     "SSR", (6, 5, 5, 2, 2), "Raw Talent"),
+    "kira":       ("Ryosuke Kira",      "N",   (4, 2, 2, 3, 2), "Fallen Star"),
+    "charles":    ("Charles Chevalier", "SSR", (3, 6, 5, 4, 3), "France's Trump"),
+    "iemon":      ("Okuhito Iemon",     "R",   (2, 4, 3, 4, 3), "Midfield Anchor"),
+    "zantetsu":   ("Zantetsu Tsurugi",   "SR",  (4, 3, 6, 3, 3), "Blade of Speed"),
+    "naruhaya":   ("Asahi Naruhaya",    "R",   (3, 3, 4, 3, 3), "Pressing Forward"),
+    "yuki":       ("Ikki Niko",         "R",   (2, 3, 3, 6, 2), "Quiet"),
+    "hyoma_k":    ("Nijiro Nanase",     "R",   (3, 3, 4, 4, 2), "The Support"),
+    "wanima_a":   ("Keisuke Wanima",    "N",   (2, 2, 4, 3, 2), "Twin One"),
+    "wanima_j":   ("Junichi Wanima",    "N",   (2, 4, 2, 3, 2), "Twin Two"),
+    "igaguri":    ("Gurimu Igaguri",    "N",   (2, 3, 2, 4, 2), "The Tryhard"),
     "tokimitsu":  ("Aoshi Tokimitsu",   "R",   (3, 3, 3, 6, 2), "Unchained Power"),
     "nio":        ("Kazuma Nio",        "N",   (2, 3, 3, 6, 2), "Defensive Midfielder"),
     "hiiragi":    ("Reiji Hiiragi",     "R",   (5, 3, 5, 3, 3), "Forward"),
@@ -205,8 +215,10 @@ def resolve(needle: str) -> str | None:
     if key in ROSTER:
         return key
     for char_key, (name, *_) in ROSTER.items():
+        if key == name.lower():
+            return char_key
         tokens = {t.lower() for t in name.split()}
-        if key == name.lower() or key in tokens:
+        if key in tokens and len(tokens) == 1:
             return char_key
     return None
 

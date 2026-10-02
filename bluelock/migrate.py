@@ -25,7 +25,7 @@ def import_legacy_wallet() -> int:
         db.touch_player(uid, str(uname))
         amount = int(balances.get(str(uid), 0) or 0)
         if amount:
-            db.add_yen(uid, amount, "انتقال از نسخه‌ی قبلی")
+            db.add_yen(uid, amount, "migrated from previous version")
             moved += 1
 
     for uname, amount in pending.items():

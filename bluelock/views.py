@@ -5,16 +5,22 @@ from telebot import types
 from . import abilities, db, economy, engine
 from .characters import ROSTER, effective_stats, epithet_of, icon_of, name_of, overall, role_of
 from .config import (
+    BOUND_ENABLED,
     BOOST_LEVELS,
+    BOUND_TIER_COST,
+    BOUND_TIER_LEVEL,
     GOAL_TARGET,
     KEEPER_CATCH_ROLL,
     KEEPER_NAME,
     KEEPER_POWER,
     LOG_KEEP,
+    MAX_BOUND_TIER,
     MAX_BOOST,
+    MAX_SKILL_SLOTS,
     MAX_STAT,
     MODES,
     REROLL_COST,
+    SKILL_SLOT_COST,
     STATS,
     TITLE_COST,
     STAT_ABBR,
@@ -69,11 +75,8 @@ def goal_card_text(out: dict, by_slot: dict, celebration: str | None = None) -> 
     elif out.get("att_total") is not None and out.get("defender") is not None and out.get("def_total") is not None:
         lines.append(f"⚔️ duel <code>{out['att_total']}</code> vs <code>{out['def_total']}</code>")
     boosts = out.get("att_boosts") or []
-    skills = [(n, v) for n, v in boosts if not str(n).startswith("🔥")]
-    if skills:
-        lines.append("⚡ " + " · ".join(f"{esc(n)} +{v}" for n, v in skills))
-    if any(str(n).startswith("🔥") for n, _ in boosts):
-        lines.append("🔥 FLOW STATE")
+    if boosts:
+        lines.append("⚡ " + " · ".join(f"{esc(n)} +{v}" for n, v in boosts))
     if out.get("assister"):
         lines.append(f"🅰 Assist — <b>{esc(out['assister'].get('name') or '?')}</b>")
     if celebration:
@@ -99,13 +102,10 @@ def rules_text() -> str:
         "\n<b>Cross</b> — FRK+🎲 vs the best defender; lands in the Final Third with an assist waiting."
         + "\n🥶 <b>Penalty</b>\nNo dice. You pick a corner, their captain calls the dive."
         "\nWrong corner → goal. Read corner → <b>always kept out</b>."
-        + "\n\n🛡 <b>Passives</b> arm themselves, <b>2 charges</b>; tap one to swap which is active."
-        "\n⚡ <b>Skills</b> = one-shot, arm with the ⚡ button. 🎲 <b>Gamble</b> = the die decides."
+        + "\n\n🛡 <b>Passives</b> arm themselves — <b>one charge</b> per match, always free."
+        "\n⚡ <b>Skills</b> = one per match (2 with an extra skill slot); arm with the ⚡ button. 🎲 <b>Gamble</b> = the die decides."
         + quote("Every character fields six abilities — two innate, four earned through levels and yen. Full details in /abilities.")
-        + "\n🔥 <b>FLOW STATE</b>\nWin field duels (set pieces don't count) to heat up:"
-        "\n3v3 → <b>2</b> wins · 4v4 → <b>3</b> · 5v5 → <b>4</b>. When the 🔥 button glows,"
-        " tap it before the next goal — every skill refills and every duel gets <b>+1</b> until full time."
-        " A goal cools the wave: unspent FLOW is lost."
+        + "\n🏃 <b>Rotation</b> — every goal turns the positions, volleyball style: the back line steps forward."
         + "\n🏁 Ranked races to <b>3</b>. Friendly matches run the clock."
     )
 
@@ -209,21 +209,6 @@ def scoreboard(match, roster) -> str:
         status = f"⏱ {clock(min(match['turn'], limit), limit)}"
 
     lines = {int(k): v for k, v in (state.get("lines", {}) or {}).items()}
-    flow = engine.flow_state(state)
-    flow_threshold = engine.flow_threshold_for(match)
-
-    def flow_tag(slot: int) -> str:
-        if flow_threshold is None:
-            return ""
-        if str(slot) in flow.get("aura", []):
-            return "🔥+1"
-        if str(slot) in flow.get("ready", []):
-            return "🔥READY"
-        wins = flow.get("wins", {}).get(str(slot), 0)
-        if wins:
-            return f"🔥{wins}/{flow_threshold}"
-        return ""
-
     def block(team: int) -> str:
         rows = []
         for r in (x for x in roster if x["team"] == team):
@@ -237,9 +222,6 @@ def scoreboard(match, roster) -> str:
                 meta.append("💨")
             if r["slot"] in buffs:
                 meta.append("✨")
-            ftag = flow_tag(r["slot"])
-            if ftag:
-                meta.append(ftag)
             charges = remaining_charges(r, state)
             if charges:
                 meta.append(f"⚡{charges}")
@@ -423,15 +405,6 @@ def action_keyboard(match, roster) -> types.InlineKeyboardMarkup:
         kb.add(types.InlineKeyboardButton("✋ Undo action", callback_data=f"undo|{mid}"))
         return kb
 
-    flow = engine.flow_state(state)
-    for r in roster:
-        if r["user_id"] is None or str(r["slot"]) not in flow.get("ready", []):
-            continue
-        kb.add(types.InlineKeyboardButton(
-            f"🔥 FLOW — {r['name']}" if len(flow.get("ready", [])) > 1 else "🔥 FLOW STATE",
-            callback_data=f"flow|{mid}",
-        ))
-
     holder = next((r for r in roster if r["slot"] == match["holder"]), None)
     has_mates = holder is not None and any(
         r["team"] == holder["team"] and r["slot"] != holder["slot"] for r in roster
@@ -585,7 +558,7 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
         f"⚡ <b>EQUIPMENT</b>\n"
         f"{icon_of(char_key)}<b>{esc(name_of(char_key))}</b> · {overall(effective_stats(char_key, {}))} OVR\n"
         f"<i>{esc(role_of(char_key))}</i>\n{RULE}\n"
-        "<i>🛡 passives arm themselves ×2 · ⚡ skills = once per match · 🎲 gamble = the die decides</i>\n"
+        "<i>🛡 passives arm themselves ×1 (free) · ⚡ skills = once per match · 🎲 gamble = the die decides</i>\n"
     )
     blocks = []
     for ab in abilities.kit_for_char(char_key):
@@ -593,7 +566,9 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
         icon = abilities.icon_for(ab)
         cat = abilities.category_of(ab)
         cat_tag = f" · {abilities.CATEGORY_ICON.get(cat, '·')} {cat}" if cat != "core" else ""
-        kind_tag = " · passive ×2" if ab.kind == "passive" else ""
+        kind_tag = " · passive ×1" if ab.kind == "passive" else ""
+        if ab.bound:
+            kind_tag += " · 🔗 bound"
         tag = TIER_TAG.get(ab.tier, "")
         title = f"{icon} <b>{ab.name}</b>{f'<i>{tag}{kind_tag}{cat_tag}</i>' if (tag or kind_tag or cat_tag) else ''}"
         if ab.tier == 1 or ab.id in owned:
@@ -607,12 +582,96 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
                 f"🔓 {ab.name} · Lv{need_lv}", callback_data=f"unlock|{ab.id}"
             ))
     kb.add(types.InlineKeyboardButton("🔄 Refresh", callback_data=f"kitrefresh|{char_key}"))
+    slots = db.get_skill_slots(user_id)
     parts = []
+    parts.append(RULE)
+    parts.append(
+        f"⚡ Skill slots — <b>{slots}/{MAX_SKILL_SLOTS}</b> usable per match"
+        + ("" if slots >= MAX_SKILL_SLOTS else " · buy the second one:")
+    )
+    if slots < MAX_SKILL_SLOTS:
+        kb.add(types.InlineKeyboardButton(
+            f"➕ Second skill slot · {yen_short(SKILL_SLOT_COST)}", callback_data="skillslot"
+        ))
     for i, block in enumerate(blocks):
         parts.append(block)
         if i < len(blocks) - 1:
             parts.append(RULE)
-    return head + "\n".join(parts), kb
+    return head + "\n" + "\n".join(x for x in parts if x), kb
+
+
+BOUND_ROMAN = {1: "I", 2: "II", 3: "III"}
+
+
+def bound_page(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
+    """🔗 /bind — pick a Bound partner, see the tier, buy upgrades."""
+    if not BOUND_ENABLED:
+        # test season: Bound exists but stays dormant — show it as inactive
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton("🔄 Refresh", callback_data="bnd|page"))
+        text = (
+            "🔗 <b>BOUND</b> — ⏸ <b>غیرفعال</b>\n"
+            f"{RULE}\n"
+            "<i>The Bound system is off for this test season. "
+            "Partners, tiers and upgrades will activate when the season starts.</i>"
+        )
+        return text, kb
+
+    own = db.owned_by(user_id)
+    tier = db.get_bound_tier(user_id)
+    partner = db.get_bound(user_id)
+    row = db.player(user_id)
+    level = level_for(row["xp"])
+    kb = types.InlineKeyboardMarkup(row_width=1)
+
+    head = f"🔗 <b>BOUND</b> · {icon_of(own['char_key'])}<b>{esc(name_of(own['char_key']))}</b>\n" if own else "🔗 <b>BOUND</b>\n"
+    body = [
+        f"Tier: <b>Bound {BOUND_ROMAN.get(tier, tier)}</b>"
+        + (" · <i>MAX</i>" if tier >= MAX_BOUND_TIER else ""),
+    ]
+    if partner:
+        prow = next((o for o in db.all_owned() if o["char_key"] == partner), None)
+        plabel = ""
+        if prow:
+            p = db.player(prow["user_id"])
+            label = (p["display"] or p["username"] or "?") if p else "?"
+            plabel = f" · {esc(label)}"
+        body.append(f"Partner: {icon_of(partner)}<b>{esc(name_of(partner))}</b>{plabel}")
+    else:
+        body.append("<i>No partner yet — pick one below.</i>")
+    body.append(
+        f"{RULE}\n"
+        "• Both on the <b>same team</b> in the match → Bound passives work, "
+        "any position in the rotation.\n"
+        "• One-sided bound → <b>BUFF</b>: both stay inactive.\n"
+        "• Tier up <b>replaces</b> the Bound with a stronger one — no switching back."
+    )
+    if tier < MAX_BOUND_TIER:
+        nt = tier + 1
+        need_lv = BOUND_TIER_LEVEL.get(nt, 99)
+        cost = BOUND_TIER_COST.get(nt, 0)
+        locked = level < need_lv
+        body.append(
+            f"\n🔼 Next: <b>Bound {BOUND_ROMAN[nt]}</b> — numeric effects +{nt - 1} "
+            f"· Lv {need_lv} · {yen(cost)}"
+        )
+        kb.add(types.InlineKeyboardButton(
+            ("🔒 " if locked else "🔼 ") + f"Upgrade to Bound {BOUND_ROMAN[nt]} · {yen_short(cost)}",
+            callback_data="bnd|up",
+        ))
+    if partner:
+        kb.add(types.InlineKeyboardButton("❌ Clear partner", callback_data="bnd|clear"))
+    others = db.all_owned(exclude_user=user_id)
+    if others:
+        body.append(f"\n{RULE}\n<b>Pick a partner:</b>")
+    for o in others[:40]:
+        p = db.player(o["user_id"])
+        who = (p["display"] or p["username"] or "?") if p else "?"
+        label = (f"▸ " if o["char_key"] == partner else "") + \
+            f"{icon_of(o['char_key'])} {name_of(o['char_key'])} · {who}"
+        kb.add(types.InlineKeyboardButton(label, callback_data=f"bnd|set|{o['user_id']}"))
+    kb.add(types.InlineKeyboardButton("🔄 Refresh", callback_data="bnd|page"))
+    return head + "\n".join(body), kb
 
 
 def profile_text(row) -> str:

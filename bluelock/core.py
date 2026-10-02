@@ -3,7 +3,7 @@ import logging
 import telebot
 
 from . import db, views
-from .config import ADMINS, ADMIN_IDS, BOT_TOKEN, LEVEL_UP_BONUS, boosts_allowed, rank_for
+from .config import ADMINS, ADMIN_IDS, BOT_TOKEN, LEVEL_UP_BONUS, MAX_LIMITS, boosts_allowed, rank_for
 from .fmt import esc, yen
 
 logger = logging.getLogger("bluelock")
@@ -127,6 +127,11 @@ def announce_levelups(chat_id: int, level_ups: list) -> None:
             f"{ricon} Rank: <b>{esc(rname)}</b>\n"
             f"💰 Bonus: <b>{yen(LEVEL_UP_BONUS * (new - old))}</b>"
         )
-        if boosts_allowed(new) > boosts_allowed(old):
-            text += "\n💪 New training slot unlocked — /shop"
+        gained = boosts_allowed(new) - boosts_allowed(old)
+        if gained > 0:
+            text += (
+                f"\n🎯 <b>LIMIT pick {boosts_allowed(new)}/{MAX_LIMITS} unlocked!</b>"
+                "\nChoose which stat gets it — /shop → Training."
+                "\n<i>Harder levels: every 5 levels = one pick, five picks in total.</i>"
+            )
         safe(bot.send_message, chat_id, text)

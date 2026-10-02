@@ -548,27 +548,6 @@ def skill_cb(call):
         render_match(match_id)
 
 
-@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("flow|"))
-def flow_cb(call):
-    seen(call)
-    match_id = cb_int(call)
-    if match_id is None:
-        safe(bot.answer_callback_query, call.id)
-        return
-    res = engine.activate_flow(match_id, call.from_user.id)
-    toasts = {
-        "ok": "🔥🔥 FLOW STATE!",
-        "notready": "Your FLOW isn't ready yet — win more duels.",
-        "duel": "Wait — a duel is being resolved.",
-        "foreign": "You're not in this match.",
-        "closed": "Not right now.",
-    }
-    safe(bot.answer_callback_query, call.id, toasts.get(res["status"], "…"), show_alert=res["status"] != "ok")
-    if res["status"] == "ok":
-        broadcast(db.match(match_id), res["line"])
-        render_match(match_id)
-
-
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("undo|"))
 def undo_cb(call):
     seen(call)

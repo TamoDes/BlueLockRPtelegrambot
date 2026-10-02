@@ -213,14 +213,14 @@ while True:
     if out["outcome"] == "goal":
         goals_seen += 1
         if out["action"] == "penalty":
-            assert out["att_spot"] != out["gk_spot"] or out.get("nerve") == "won"
+            assert out["att_spot"] != out["gk_spot"], "a read corner can never score"
         else:
             assert out["att_total"] > out["gk_total"], (out["att_total"], out["gk_total"])
             assert out["defender"] is None or out["att_total"] > out["def_total"]
     if out["outcome"] == "saved":
         saves_seen += 1
         if out["action"] == "penalty":
-            assert out["att_spot"] == out["gk_spot"] and out.get("nerve") == "lost"
+            assert out["att_spot"] == out["gk_spot"] and out.get("nerve") == "read"
         else:
             assert out["att_total"] <= out["gk_total"]
         assert db.match(match_id)["holder"] == out["receiver"]["slot"]
@@ -381,13 +381,31 @@ engine.open_duel(pm_match, "penalty", None)
 engine.submit_spot(pm_match, 101, "center")
 engine.submit_spot(pm_match, 103, "center")
 out = engine.resolve(pm_match)
-assert out["outcome"] in ("goal", "saved"), out
+assert out["outcome"] == "saved", out
 assert out["att_spot"] == "center" and out["gk_spot"] == "center"
-if out["outcome"] == "saved":
-    assert out["nerve"] == "lost" and out["pen_sho"] < out["pen_gk"]
-else:
-    assert out["nerve"] == "won" and out["pen_sho"] >= out["pen_gk"]
+assert out["nerve"] == "read", out
+assert "pen_sho" not in out and "pen_gk" not in out, "read corner: no nerve duel at all"
 print(engine.describe(out))
+
+# penalty rule: a read corner is 100% kept out, a missed corner is 100% a goal — no dice either way
+reads = saves = 0
+for _ in range(40):
+    stage(pm_match, taker["slot"], set_piece="penalty", zone=ZONE_BOX)
+    engine.open_duel(pm_match, "penalty", None)
+    engine.submit_spot(pm_match, 101, "left")
+    engine.submit_spot(pm_match, 103, "left")
+    out = engine.resolve(pm_match)
+    assert out["outcome"] == "saved" and out["nerve"] == "read", out
+    reads += 1
+    saves += out["outcome"] == "saved"
+    stage(pm_match, taker["slot"], set_piece="penalty", zone=ZONE_BOX)
+    engine.open_duel(pm_match, "penalty", None)
+    engine.submit_spot(pm_match, 101, "left")
+    engine.submit_spot(pm_match, 103, "right")
+    out = engine.resolve(pm_match)
+    assert out["outcome"] == "goal", out
+assert saves == reads == 40
+print(f"ok  penalty reads: {saves}/{reads} saved, misses: 40/40 scored")
 
 stage(pm_match, taker["slot"], set_piece="freekick", zone=1)
 opened = engine.open_duel(pm_match, "freekick", None)
@@ -659,21 +677,15 @@ assert opened["duel"]["att_power"] == base_dri + 2, ("passive must arm itself", 
 assert opened["duel"]["att_boosts"] == [("Cold Predator", 2)], opened["duel"]["att_boosts"]
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
-assert st["charges"]["rin_p1"] == 1, "auto-fired passive used one of two charges"
-
-restage(mid, rs, zone=0)
-opened = engine.open_duel(mid, "dribble", None)
-assert opened["duel"]["att_power"] == base_dri + 2, "second charge fires on its own too"
-engine.cancel_duel(mid)
-st = engine.pending_of(db.match(mid))
-assert "rin_p1" in st["used"], "second use exhausts the passive"
+assert st["charges"]["rin_p1"] == 0, "one-charge passive: the fired charge is spent"
+assert "rin_p1" in st["used"], "spent passive moves to used"
 
 restage(mid, rs, zone=0)
 opened = engine.open_duel(mid, "dribble", None)
 assert ("Cold Predator", 2) not in opened["duel"]["att_boosts"], "spent passive must not fire again"
 engine.cancel_duel(mid)
 assert engine.arm_skill(mid, rin_u, "rin_p1")["status"] == "spent"
-print("ok  passives fire on their own: 2 charges, boosts tagged on the calc line")
+print("ok  passives fire on their own: one charge per match, boosts tagged on the calc line")
 
 # S2: passive condition checked at resolution, not blindly.
 # last_pass holds the PASSER's slot, so stage a real received pass from the teammate.
@@ -846,7 +858,7 @@ assert (lv2, lv3, lv4) == (
     config.ABILITY_T2_LEVEL, config.ABILITY_T3_LEVEL, config.ABILITY_T4_LEVEL
 )
 assert cost2 < cost3 < cost4
-assert len(abilities.kit_for_char("isagi")) == 6
+assert len(abilities.kit_for_char("isagi")) == 7  # 6 kit + 1 bound passive
 fresh = make_user("sae")
 starters = abilities.starter_ids("sae")
 assert abilities.owned_ids(fresh, "sae") == starters
@@ -927,7 +939,8 @@ assert afterY["phase"] == "play", "devour replays the turn"
 assert afterY["holder"] == yslot, "ball stays with the devourer"
 assert afterY["turn"] == 1, f"turn should NOT advance on devour, got {afterY['turn']}"
 pendingY = engine.pending_of(afterY)
-assert pendingY["charges"].get("isagi_p2") == 1, "devour burns one of two charges"
+assert pendingY["charges"].get("isagi_p2") == 0, "devour burns its only charge"
+assert "isagi_p2" in pendingY.get("used", []), "spent passive moves to used"
 assert not pendingY.get("duel")
 assert engine.describe(out).count("doesn't count") == 1
 print("ok  devour the stage: first loss replays the turn, charge spent")
@@ -944,7 +957,7 @@ print("ok  devour the stage: only the first loss is free")
 new_users = {}
 for nk in ("aiku", "charles", "ness", "zantetsu"):
     assert characters.resolve(characters.name_of(nk)) == nk, nk
-    assert len(abilities.kit_for_char(nk)) == 6, nk
+    assert len(abilities.kit_for_char(nk)) == 7, nk  # 6 kit + 1 bound passive
     n_u = make_user(nk)
     new_users[nk] = n_u
     n_txt, _ = views.kit_page(n_u, nk)
@@ -1101,15 +1114,15 @@ for _key, _pool in engine.COMMENTARY.items():
         assert _s and "<b>" in _s, (_key, _tpl)
 print("ok  commentary: all 8 pools >= 3 variants, every variant renders clean")
 
-_b = "\n".join(engine.big_moment_lines({"att_boosts": [("🔥flow", 1), ("Deadline", 2)], "gamble_beaten": 3}, 3))
-assert "HAT-TRICK" in _b and "FLOW" in _b and "🎲" in _b, _b
+_b = "\n".join(engine.big_moment_lines({"att_boosts": [("Deadline", 2)], "gamble_beaten": 3}, 3))
+assert "HAT-TRICK" in _b and "🎲" in _b, _b
 assert engine.big_moment_lines({"att_boosts": []}, 1) == [], "quiet goals add no noise"
-print("ok  big moments: hat-trick + FLOW + gamble quotes, quiet goals stay clean")
+print("ok  big moments: hat-trick + gamble quotes, quiet goals stay clean")
 
 _g_out = {
     "outcome": "goal", "action": "shoot",
     "actor": {"name": "Ace", "user_id": fresh}, "defender": {"name": "Wall"},
-    "att_boosts": [("Deadline", 2), ("🔥flow", 1)], "def_boosts": [],
+    "att_boosts": [("Deadline", 2)], "def_boosts": [],
     "att_total": 9, "def_total": 5,
 }
 _card = views.goal_card_text(_g_out, {1: {"name": "Ace", "char_key": "isagi"}}, "🎉 SIUUU")

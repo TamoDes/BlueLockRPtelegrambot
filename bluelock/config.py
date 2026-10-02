@@ -116,7 +116,10 @@ MAX_BOOST = 2
 MAX_TITLE_LEN = 24
 BASE_MAX = 6
 MAX_STAT = BASE_MAX + MAX_BOOST
-BOOST_LEVELS = (4, 12, 30)
+# ── limit system: every 5 levels the player picks ONE limit (max 5 total) ──
+LIMIT_LEVELS = (5, 10, 15, 20, 25)
+MAX_LIMITS = 5
+BOOST_LEVELS = LIMIT_LEVELS  # training slots unlock with the limit picks (5/10/15/20/25)
 
 ABILITY_T2_LEVEL = 15
 ABILITY_T2_COST = 1_500_000
@@ -132,8 +135,18 @@ XP_WIN = 80
 XP_DRAW = 40
 XP_LOSS = 20
 XP_ACTION = 5
-XP_PER_LEVEL = 260
+XP_PER_LEVEL = 520  # leveled up: 2× harder than before
 LEVEL_UP_BONUS = 250_000
+
+# ── bound system: starts at tier 1, upgrades buy a stronger version ────────
+BOUND_ENABLED = False  # TEST SEASON: Bound stays off; flip to True for release
+MAX_BOUND_TIER = 3
+BOUND_TIER_LEVEL = {2: 5, 3: 10}
+BOUND_TIER_COST = {2: 1_500_000, 3: 4_000_000}
+
+# ── skill slots: 1 usable skill per match at first, buy the 2nd ────────────
+MAX_SKILL_SLOTS = 2
+SKILL_SLOT_COST = 2_000_000
 
 SIZES = (1, 2, 3, 4, 5)
 MODES = {"ranked": "Ranked"}
@@ -152,16 +165,6 @@ DAILY_STEP = 25_000
 DAILY_MAX_STREAK = 7
 QUEST_REWARD = 120_000
 QUESTS_PER_DAY = 3
-
-FLOW_MIN_SIZE = 3
-FLOW_AURA = 1
-
-
-def flow_threshold(size: int) -> int | None:
-    """Duels a player must win to earn FLOW — None in formats without flow."""
-    if size < FLOW_MIN_SIZE:
-        return None
-    return size - 1
 
 RANKS = (
     (1, "Prospect"),

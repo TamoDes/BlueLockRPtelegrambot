@@ -5,6 +5,7 @@ from . import abilities, db
 from .abilities import kits_by_user
 from .characters import effective_stats, role_of
 from .config import (
+    BOUND_ENABLED,
     DICE_FACES,
     GOAL_TARGET,
     KEEPER_CATCH_ROLL,
@@ -118,7 +119,6 @@ def fresh_state() -> dict:
         "last_holder": None,
         "charges": {},
         "stamp": {},
-        "flow": {},
     }
 
 
@@ -228,6 +228,24 @@ def initial_lines(roster: list) -> dict:
     return lines
 
 
+def rotate_lines_after_goal(lines: dict, roster: list) -> dict:
+    """Volleyball-style rotation after a goal: within each team the position
+    values shift one step — the back line steps forward, the top line wraps
+    around. Lane multiset per team is preserved, keeper is never a slot here
+    (the keeper is the AI, every roster slot is a field player)."""
+    lines = {int(k): v for k, v in (lines or {}).items()}
+    for team in (1, 2):
+        mates = [r for r in roster if r["team"] == team]
+        if len(mates) < 2:
+            continue
+        mates.sort(key=lambda r: (lines.get(r["slot"], line_of(r)), r["slot"]))
+        vals = [lines.get(r["slot"], line_of(r)) for r in mates]
+        rotated = [vals[-1]] + vals[:-1]  # defender → one step forward, top → back
+        for r, lane in zip(mates, rotated):
+            lines[r["slot"]] = lane
+    return lines
+
+
 def shift_lines(lines: dict, roster: list, holder_team: int) -> dict:
     lines = {int(k): v for k, v in (lines or {}).items()}
     out = {}
@@ -249,7 +267,55 @@ def _drop_auto_armed(state: dict) -> None:
             armed.pop(slot, None)
 
 
+def bound_active(ctx: dict) -> bool:
+    """Bound condition: the owner's Bound partner is on the SAME team in this
+    match. Position in the rotation is irrelevant — both present = works.
+    A one-way bound (BUFF) fails is_bound_pair → neither side activates.
+    TEST SEASON: BOUND_ENABLED is False → Bound never activates."""
+    if not BOUND_ENABLED:
+        return False
+    row = ctx.get("self")
+    roster = ctx.get("roster") or []
+    if row is None:
+        return False
+    try:
+        uid = row["user_id"]
+    except (KeyError, IndexError, TypeError):
+        return False
+    if uid is None:
+        return False
+    partner_char = db.get_bound(uid)
+    if not partner_char:
+        return False
+    mate = next(
+        (
+            r for r in roster
+            if r["user_id"] is not None and r["user_id"] != uid
+            and r["char_key"] == partner_char and r["team"] == row["team"]
+        ),
+        None,
+    )
+    if mate is None:
+        return False
+    return bool(db.is_bound_pair(uid, mate["user_id"], roster))
+
+
+def bound_bonus(ab, ctx: dict, val: int) -> int:
+    """Numeric Bound abilities scale with the purchased tier: +(tier - 1)."""
+    if not ab.bound or not val:
+        return val
+    try:
+        uid = ctx["self"]["user_id"]
+    except (KeyError, IndexError, TypeError):
+        return val
+    if uid is None:
+        return val
+    return val + max(0, db.get_bound_tier(uid) - 1)
+
+
 def _gated(ab, ctx) -> bool:
+    if ab.bound and not bound_active(ctx):
+        return False
     if ab.when is None:
         return True
     try:
@@ -350,14 +416,6 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
     if no_dice:
         duel["no_dice"] = True
 
-    aura = flow_state(state).get("aura", [])
-    if str(actor["slot"]) in aura:
-        duel["att_power"] += FLOW_AURA_BONUS
-        duel["att_boosts"].append(("🔥flow", FLOW_AURA_BONUS))
-    if defender is not None and str(defender["slot"]) in aura:
-        duel["def_power"] += FLOW_AURA_BONUS
-        duel["def_boosts"].append(("🔥flow", FLOW_AURA_BONUS))
-
     # --- armed skill / passive of the attacker (manual activation) ------------
     armed = None if no_dice else abilities.peek_armed(state, actor["slot"])
     if armed is not None and _gated(armed, ctx_att):
@@ -380,9 +438,11 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                     val = armed.att(ctx_att) or 0
                 except Exception:
                     val = 0
+                val = bound_bonus(armed, ctx_att, val)
             if val or armed.save_self or armed.die_floor or armed.tie_win:
                 abilities.spend_armed(state, actor["slot"])
                 if val:
+                    val = bound_bonus(armed, ctx_att, val)
                     duel["att_power"] += val
                     duel["att_boosts"].append((armed.name, val))
                 if armed.gk_down:
@@ -439,6 +499,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                 val = d_armed.dfd(ctx_def) or 0
             except Exception:
                 val = 0
+            val = bound_bonus(d_armed, ctx_def, val)
             if val:
                 abilities.spend_armed(state, row["slot"])
                 duel[power_key] += val
@@ -712,6 +773,16 @@ def arm_skill(match_id: int, user_id: int, ability_id: str) -> dict:
         state = json.loads(row["pending"] or "{}")
         if not abilities.usable(state, ab):
             return {"status": "spent"}
+        if ab.kind == "skill":
+            # skill slots: how many DIFFERENT skills a player may use per match
+            slots = db.get_skill_slots(user_id)
+            used_skills = 0
+            for u in state.get("used", []):
+                g = abilities.get(u)
+                if g is not None and g.kind == "skill" and g.char == ab.char:
+                    used_skills += 1
+            if used_skills >= slots:
+                return {"status": "spent", "name": ab.name}
         if match["phase"] == "duel" and not is_defensive(ab):
             return {"status": "notturn", "name": ab.name}
         current = state.setdefault("armed", {})
@@ -768,119 +839,6 @@ def _snapshot(duel: dict, actor, defender, zone: int) -> dict:
         "gk_total": total(duel, "gk"),
         "vs_keeper": duel["action"] in KEEPER_ACTIONS or duel["action"] == "penalty",
     }
-
-
-# ------------------------------------------------------------------ FLOW STATE
-
-FLOW_AURA_BONUS = 1
-
-
-def flow_threshold_for(match) -> int | None:
-    from .config import flow_threshold
-    return flow_threshold(match["size"])
-
-
-def flow_state(state: dict) -> dict:
-    flow = state.setdefault("flow", {})
-    flow.setdefault("wins", {})
-    flow.setdefault("ready", [])
-    flow.setdefault("spent", [])
-    flow.setdefault("aura", [])
-    return flow
-
-
-def flow_wins(state: dict, slot: int) -> int:
-    wins = flow_state(state)["wins"]
-    return wins.get(str(slot), 0)
-
-
-def _flow_credit(state: dict, slot: int | None) -> None:
-    if slot is None:
-        return
-    flow = flow_state(state)
-    key = str(slot)
-    flow["wins"][key] = flow_wins(state, slot) + 1
-
-
-def _flow_outcome_field_duel(out: dict) -> tuple[str | None, str]:
-    """(winner slot key, side) for real field duels; set pieces never count."""
-    action = out["action"]
-    if action in SET_PIECES or action == "cross" or action == "penalty":
-        return (None, "")
-    outcome = out["outcome"]
-    if outcome in ("pass_ok", "dribble_ok") and not out.get("walked"):
-        return ("actor", "att")
-    if outcome == "tackled" and out.get("stopped_by_skill") is None and out["defender"] is not None:
-        return ("defender", "def")
-    if outcome == "intercepted" and out.get("stopped_by_skill") is None and out["defender"] is not None and not out.get("first_free"):
-        return ("defender", "def")
-    if outcome == "blocked" and out.get("stopped_by_skill") is None and not out.get("first_free"):
-        if out["defender"] is not None:
-            return ("defender", "def")
-    return (None, "")
-
-
-def credit_flow_wins(match, state: dict, out: dict, roster: list) -> list[str]:
-    """Count field-duel wins toward FLOW after a resolved action; returns notes."""
-    threshold = flow_threshold_for(match)
-    if threshold is None:
-        return []
-    winner_key, _side = _flow_outcome_field_duel(out)
-    if winner_key is None:
-        return []
-    row = out[winner_key]
-    if row is None:
-        return []
-    slot = row["slot"]
-    _flow_credit(state, slot)
-    if flow_wins(state, slot) < threshold:
-        return []
-    flow = flow_state(state)
-    slot_key = str(slot)
-    if slot_key in flow["ready"] or slot_key in flow["spent"]:
-        return []
-    flow["ready"].append(slot_key)
-    return [f"🔥 <b>{row['name']}</b> is heating up — FLOW is ready! Tap it from the bar before your next play."]
-
-
-def activate_flow(match_id: int, user_id: int) -> dict:
-    """Player spends a ready FLOW: refill kit charges + permanent +1 aura."""
-    match = db.match(match_id)
-    if not match or match["status"] != "live":
-        return {"status": "closed"}
-    roster = db.roster(match_id)
-    me = next((r for r in roster if r["user_id"] == user_id), None)
-    if me is None:
-        return {"status": "foreign"}
-    with db.tx() as c:
-        row = c.execute(
-            "SELECT pending FROM matches WHERE id=? AND status='live' AND phase='play'",
-            (match_id,),
-        ).fetchone()
-        if not row:
-            return {"status": "closed"}
-        state = json.loads(row["pending"] or "{}")
-        flow = flow_state(state)
-        slot_key = str(me["slot"])
-        if slot_key in flow["spent"] or slot_key not in flow["ready"]:
-            return {"status": "notready", "name": me["name"]}
-        if state.get("duel"):
-            return {"status": "duel", "name": me["name"]}
-        flow["ready"].remove(slot_key)
-        flow["spent"].append(slot_key)
-        flow["aura"].append(slot_key)
-        for ab in abilities.kit_of(abilities.kits_by_user(roster), me):
-            charges = state.setdefault("charges", {})
-            charges[ab.id] = abilities.PASSIVE_CHARGES if ab.kind == "passive" else 1
-            if ab.id in state.get("used", []):
-                state["used"].remove(ab.id)
-        line = (
-            f"🔥🔥 <b>FLOW STATE — {me['name']}</b> 🔥🔥\n"
-            f"<i>Every skill refilled, every duel +1 until full time.</i>"
-        )
-        db.log_event(match_id, line)
-        c.execute("UPDATE matches SET pending=? WHERE id=?", (json.dumps(state), match_id))
-    return {"status": "ok", "name": me["name"], "line": line}
 
 
 def resolve(match_id: int) -> dict | None:
@@ -1038,12 +996,11 @@ def resolve(match_id: int) -> dict | None:
         db.update_match(match_id, **{field: match[field] + 1})
         conceded = [r for r in roster if r["team"] != actor["team"]]
         new_holder = turnover(random.choice(conceded)["slot"] if conceded else actor["slot"])
+        # volleyball-style rotation: after every goal the positions turn over —
+        # whoever sat in the back line steps one step forward.
+        state["lines"] = rotate_lines_after_goal(state.get("lines", {}), roster)
         if beaten and beaten[-1] == actor["slot"] and actor["slot"] not in wall_beaten:
             beaten.pop()
-        flow = flow_state(state)
-        if flow.get("ready"):
-            flow["ready"] = []
-            out["flow_cooled"] = True
 
     def grant_buff(receiver_slot: int, amount: int, ab) -> None:
         state.setdefault("buffs", []).append(
@@ -1201,7 +1158,7 @@ def resolve(match_id: int) -> dict | None:
             buff_ab = abilities.peek_armed(state, actor["slot"])
             if buff_ab is not None and buff_ab.pass_buff:
                 abilities.spend_armed(state, actor["slot"])
-                grant_buff(duel["target"], buff_ab.pass_buff, buff_ab)
+                grant_buff(duel["target"], bound_bonus(buff_ab, {"self": actor, "roster": roster}, buff_ab.pass_buff), buff_ab)
             if buff_ab is not None and buff_ab.pass_advance:
                 abilities.spend_armed(state, actor["slot"])
                 state["zone"] = min(ZONE_BOX, state["zone"] + buff_ab.pass_advance)
@@ -1215,7 +1172,7 @@ def resolve(match_id: int) -> dict | None:
             buff_ab = abilities.peek_armed(state, actor["slot"])
             if buff_ab is not None and buff_ab.pass_buff:
                 abilities.spend_armed(state, actor["slot"])
-                grant_buff(duel["target"], buff_ab.pass_buff, buff_ab)
+                grant_buff(duel["target"], bound_bonus(buff_ab, {"self": actor, "roster": roster}, buff_ab.pass_buff), buff_ab)
         else:
             out["outcome"] = "dribble_ok"
             out["walked"] = bool(duel.get("no_dice"))
@@ -1226,8 +1183,7 @@ def resolve(match_id: int) -> dict | None:
     state["beaten"] = beaten
     out["beaten"] = beaten
     out["kept_possession"] = kept_possession
-    flow_notes = credit_flow_wins(match, state, out, roster)
-    out["notes"] = notes + state.pop("notes", []) + flow_notes
+    out["notes"] = notes + state.pop("notes", [])
 
     _drop_auto_armed(state)
     state.pop("duel", None)
@@ -1344,15 +1300,13 @@ def commentary(key: str, **kw) -> str:
 
 
 def big_moment_lines(out: dict, goals: int) -> list[str]:
-    """Extra hype lines for a goal — hat-trick, FLOW-powered, gamble payoff.
+    """Extra hype lines for a goal — hat-trick, gamble payoff.
 
     Quiet goals return nothing: every added line must earn its place.
     """
     notes: list[str] = []
     if goals >= 3:
         notes.append("🎩 <b>HAT-TRICK!</b>")
-    if any(str(n).startswith("🔥") for n, _ in (out.get("att_boosts") or [])):
-        notes.append("🔥 <b>FLOW STATE</b> finish.")
     if out.get("gamble_beaten"):
         notes.append(f"🎲 <b>RISK PAID OFF</b> — {out['gamble_beaten']} beaten on the die.")
     return notes
@@ -1436,8 +1390,6 @@ def describe(out: dict, by_slot: dict | None = None) -> str:
         line += f"\n     🧤 {gk_line(out)}"
         if out.get("assister"):
             line += f"\n     🅰 Assist — <b>{out['assister']['name']}</b>"
-        if out.get("flow_cooled"):
-            line += "\n     🌊 <i>The wave cooled — unclaimed FLOW is gone.</i>"
         return line
     if outcome == "saved":
         catch = out.get("keeper_dist") == "catch"

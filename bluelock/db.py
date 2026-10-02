@@ -160,6 +160,19 @@ def connect() -> sqlite3.Connection:
             pcols = {r[1] for r in _conn.execute("PRAGMA table_info(players)")}
             if "celebration" not in pcols:
                 _conn.execute("ALTER TABLE players ADD COLUMN celebration TEXT")
+            ocols = {r[1] for r in _conn.execute("PRAGMA table_info(owned)")}
+            if "bound_with" not in ocols:
+                _conn.execute("ALTER TABLE owned ADD COLUMN bound_with TEXT")
+            if "bound_tier" not in ocols:
+                _conn.execute("ALTER TABLE owned ADD COLUMN bound_tier INTEGER NOT NULL DEFAULT 1")
+            pcols1 = {r[1] for r in _conn.execute("PRAGMA table_info(players)")}
+            if "skill_slots" not in pcols1:
+                _conn.execute("ALTER TABLE players ADD COLUMN skill_slots INTEGER NOT NULL DEFAULT 1")
+            pcols2 = {r[1] for r in _conn.execute("PRAGMA table_info(players)")}
+            if "stat_points" not in pcols2:
+                _conn.execute("ALTER TABLE players ADD COLUMN stat_points INTEGER NOT NULL DEFAULT 0")
+            if "allocated_stats" not in pcols2:
+                _conn.execute("ALTER TABLE players ADD COLUMN allocated_stats TEXT NOT NULL DEFAULT '{}'")
             _conn.commit()
         return _conn
 
@@ -288,7 +301,7 @@ def touch_player(user_id: int, username: str | None) -> None:
                 c.execute("UPDATE players SET yen = yen + ? WHERE user_id=?", (pend["amount"], user_id))
                 c.execute(
                     "INSERT INTO wallet_tx(user_id, amount, reason, created_at) VALUES(?,?,?,?)",
-                    (user_id, pend["amount"], "آزادسازی ین معلق", now()),
+                    (user_id, pend["amount"], "pending yen released", now()),
                 )
             c.execute("DELETE FROM pending_yen WHERE username=?", (uname,))
 
@@ -838,4 +851,148 @@ def grant_achievement(user_id: int, medal: str) -> bool:
             "INSERT OR IGNORE INTO achievements(user_id, medal, earned_at) VALUES(?,?,?)",
             (user_id, medal, now()),
         )
-        return cur.rowcount == 1
+        return cur.rowcount > 0
+
+
+# ── bound / partnership ──────────────────────────────────────────────────
+
+def set_bound(user_id: int, partner_char_key: str | None) -> None:
+    """Set the bound partner for a user's character. None to clear."""
+    with tx() as c:
+        c.execute("UPDATE owned SET bound_with=? WHERE user_id=?", (partner_char_key, user_id))
+
+
+def get_bound(user_id: int) -> str | None:
+    """Return the bound partner's char_key, or None."""
+    row = q1("SELECT bound_with FROM owned WHERE user_id=?", (user_id,))
+    return row["bound_with"] if row else None
+
+
+def get_bound_tier(user_id: int) -> int:
+    """Bound tier: 1 = base, 2/3 = upgraded (bought after level-up)."""
+    row = q1("SELECT bound_tier FROM owned WHERE user_id=?", (user_id,))
+    return int(row["bound_tier"] or 1) if row else 1
+
+
+def set_bound_tier(user_id: int, tier: int) -> None:
+    with tx() as c:
+        c.execute("UPDATE owned SET bound_tier=? WHERE user_id=?", (max(1, int(tier)), user_id))
+
+
+def get_skill_slots(user_id: int) -> int:
+    """How many skills a player may USE per match (1 base, buyable to 2)."""
+    row = q1("SELECT skill_slots FROM players WHERE user_id=?", (user_id,))
+    return int(row["skill_slots"] or 1) if row else 1
+
+
+def set_skill_slots(user_id: int, n: int) -> None:
+    with tx() as c:
+        c.execute("UPDATE players SET skill_slots=? WHERE user_id=?", (max(1, int(n)), user_id))
+
+
+def all_owned(exclude_user: int | None = None) -> list:
+    """Every player's character — used by the /bind partner picker."""
+    if exclude_user is None:
+        return q("SELECT user_id, char_key FROM owned ORDER BY user_id")
+    return q("SELECT user_id, char_key FROM owned WHERE user_id!=? ORDER BY user_id", (exclude_user,))
+
+
+def is_bound_pair(user1_id: int, user2_id: int, roster: list) -> bool:
+    """
+    True if both users are on the SAME team AND are mutually bound to each other.
+    Same-team check: both have same team int in roster.
+    """
+    p1_own = q1("SELECT char_key FROM owned WHERE user_id=?", (user1_id,))
+    p2_own = q1("SELECT char_key FROM owned WHERE user_id=?", (user2_id,))
+    if not p1_own or not p2_own:
+        return False
+    p1_bound = q1("SELECT bound_with FROM owned WHERE user_id=?", (user1_id,))
+    p2_bound = q1("SELECT bound_with FROM owned WHERE user_id=?", (user2_id,))
+    if not p1_bound or not p2_bound:
+        return False
+    # Must be mutual bound (A→B and B→A)
+    p1_char = p1_own["char_key"]
+    p2_char = p2_own["char_key"]
+    if p1_bound["bound_with"] != p2_char or p2_bound["bound_with"] != p1_char:
+        return False
+    # Check same team
+    r1 = next((r for r in roster if r["user_id"] == user1_id), None)
+    r2 = next((r for r in roster if r["user_id"] == user2_id), None)
+    if not r1 or not r2:
+        return False
+    return r1["team"] == r2["team"]
+
+
+def is_buff_pair(user1_id: int, user2_id: int) -> bool:
+    """
+    True if user1 is bound TO user2 but user2 is NOT bound back (one-way).
+    This means BUFF: neither passive activates.
+    """
+    p1 = q1("SELECT bound_with FROM owned WHERE user_id=?", (user1_id,))
+    p2_own = q1("SELECT char_key FROM owned WHERE user_id=?", (user2_id,))
+    if not p1 or not p2_own:
+        return False
+    # One-way = user2 does NOT have user1 as their bound
+    p2 = q1("SELECT bound_with FROM owned WHERE user_id=?", (user2_id,))
+    if not p2:
+        return False
+    p1_bound_to = p1["bound_with"]
+    p2_bound_char = p2_own["char_key"]
+    p2_bound_to = p2["bound_with"]
+    # BUFF if p1 is bound to p2's char but p2 is NOT bound to p1's char
+    p1_own_char = q1("SELECT char_key FROM owned WHERE user_id=?", (user1_id,))
+    if not p1_own_char:
+        return False
+    return p1_bound_to == p2_bound_char and p2_bound_to != p1_own_char["char_key"]
+
+
+# ── stat allocation ─────────────────────────────────────────────────────
+
+def allocate_stat(user_id: int, stat: str, amount: int = 1) -> None:
+    """Add amount to a player's allocated stat bonus. stat in ['spd','drb','shk','def','pas']."""
+    import json
+    with tx() as c:
+        row = c.execute("SELECT allocated_stats FROM players WHERE user_id=?", (user_id,)).fetchone()
+        alloc = json.loads(row["allocated_stats"] or "{}") if row else {}
+        alloc[stat] = alloc.get(stat, 0) + amount
+        c.execute("UPDATE players SET allocated_stats=? WHERE user_id=?", (json.dumps(alloc), user_id))
+
+
+def get_allocated_stats(user_id: int) -> dict[str, int]:
+    """Return allocated stat bonuses for a player. e.g. {'spd':1,'drb':0,...}"""
+    import json
+    from .config import STATS
+    row = q1("SELECT allocated_stats FROM players WHERE user_id=?", (user_id,))
+    alloc = json.loads(row["allocated_stats"] or "{}") if row else {}
+    return {s: alloc.get(s, 0) for s in STATS}
+
+
+def spend_stat_point(user_id: int) -> bool:
+    """Spend 1 stat point. Returns False if none available."""
+    with tx() as c:
+        row = c.execute("SELECT stat_points FROM players WHERE user_id=?", (user_id,)).fetchone()
+        if not row or row["stat_points"] < 1:
+            return False
+        c.execute("UPDATE players SET stat_points = stat_points - 1 WHERE user_id=?", (user_id,))
+        return True
+
+
+def add_stat_point(user_id: int, amount: int = 1) -> None:
+    with tx() as c:
+        c.execute("UPDATE players SET stat_points = stat_points + ? WHERE user_id=?", (amount, user_id))
+
+
+# ── level-up helper ─────────────────────────────────────────────────────
+
+def check_level_up(user_id: int) -> int | None:
+    """
+    Check if a player just leveled up. Returns new level or None.
+    XP thresholds: level * 100 (so lvl 2 = 100, lvl 3 = 200, etc.)
+    """
+    from .config import level_for
+    row = q1("SELECT xp FROM players WHERE user_id=?", (user_id,))
+    if not row:
+        return None
+    current_level = level_for(row["xp"])
+    prev_level = level_for(row["xp"] - 1)
+    return current_level if current_level > prev_level else None

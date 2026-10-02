@@ -17,11 +17,17 @@ from .characters import (
     role_of,
 )
 from .config import (
+    BOUND_ENABLED,
     BOOST_LEVELS,
+    BOUND_TIER_COST,
+    BOUND_TIER_LEVEL,
+    MAX_BOUND_TIER,
     MAX_BOOST,
+    MAX_SKILL_SLOTS,
     MAX_STAT,
     MAX_TITLE_LEN,
     REROLL_COST,
+    SKILL_SLOT_COST,
     STAT_ABBR,
     STAT_NAME,
     STATS,
@@ -68,6 +74,7 @@ def start(message):
         "⚔️ /newmatch — Open a lobby (works right here in PM)\n"
         "📋 /matches — Find a match and join from any chat\n"
         "⚡ /abilities — Skills & passives; unlock deeper layers\n"
+        "🔗 /bind — Bound partner, tiers & upgrades\n"
         "💪 /shop — Train stats, buy titles\n"
         "🏆 /top — Leaderboards\n"
         "📖 /rules — Duels, set pieces & penalty nerve\n"
@@ -80,8 +87,8 @@ def start(message):
         "🧤 /keeper — The goalkeeper's limits\n"
         "🏳️ /surrender — Your captain forfeits\n"
         + RULE
-        + "<i>\n🛡 Passives arm themselves — 2 charges each, no button needed."
-        " ⚡ Skills fire once per match — press ⚡ to arm one. 🎲 Gamble skills roll your die and let fate decide.</i>\n"
+        + "<i>\n🛡 Passives arm themselves — one charge each, no button needed."
+        " ⚡ Skills fire once per match — press ⚡ to arm one (2 uses with an extra skill slot). 🎲 Gamble skills roll your die and let fate decide.</i>\n"
         + f"💰 <b>{yen(row['yen'])}</b> · Lv <b>{level}</b>"
         + ("" if own else "\n\n<i>No character yet — /gacha to pull one.</i>"),
     )
@@ -472,6 +479,97 @@ def kitrefresh_cb(call):
         return
     _edit_kit_page(call, call.from_user.id, own["char_key"])
     safe(bot.answer_callback_query, call.id)
+
+
+# ------------------------------------------------------------------ bound
+
+@bot.message_handler(commands=["bind"])
+def bind(message):
+    seen(message)
+    text, kb = views.bound_page(message.from_user.id)
+    safe(bot.reply_to, message, text, reply_markup=kb)
+
+
+def _refresh_bound(call):
+    text, kb = views.bound_page(call.from_user.id)
+    if call.message:
+        safe(bot.edit_message_text, text, call.message.chat.id, call.message.message_id, reply_markup=kb)
+
+
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("bnd|"))
+def bind_cb(call):
+    seen(call)
+    part = call.data.split("|")
+    uid = call.from_user.id
+    act = part[1] if len(part) > 1 else "page"
+
+    if act == "set" and len(part) > 2:
+        if not BOUND_ENABLED:
+            safe(bot.answer_callback_query, call.id, "⏸ Bound is غیرفعال in this test season.", show_alert=True)
+            return
+        try:
+            target = int(part[2])
+        except ValueError:
+            target = None
+        target_own = db.owned_by(target) if target else None
+        if target is None or target_own is None or target == uid:
+            safe(bot.answer_callback_query, call.id, "Pick another player's character.", show_alert=True)
+            return
+        db.set_bound(uid, target_own["char_key"])
+        safe(bot.answer_callback_query, call.id, f"🔗 Bound to {name_of(target_own['char_key'])} — no switching later, only tier upgrades.")
+        _refresh_bound(call)
+        return
+
+    if act == "clear":
+        db.set_bound(uid, None)
+        safe(bot.answer_callback_query, call.id, "❌ Partner cleared.")
+        _refresh_bound(call)
+        return
+
+    if act == "up":
+        if not BOUND_ENABLED:
+            safe(bot.answer_callback_query, call.id, "⏸ Bound is غیرفعال in this test season.", show_alert=True)
+            return
+        own = db.owned_by(uid)
+        tier = db.get_bound_tier(uid)
+        nt = tier + 1
+        need_lv = BOUND_TIER_LEVEL.get(nt)
+        cost = BOUND_TIER_COST.get(nt)
+        if not own or need_lv is None or cost is None or nt > MAX_BOUND_TIER:
+            safe(bot.answer_callback_query, call.id, "Bound is already maxed.", show_alert=True)
+            return
+        prow = db.player(uid)
+        if prow is None or level_for(prow["xp"]) < need_lv:
+            safe(bot.answer_callback_query, call.id, f"🔒 Requires level {need_lv}.", show_alert=True)
+            return
+        if not db.spend_yen(uid, cost, f"bound tier {nt}"):
+            safe(bot.answer_callback_query, call.id, f"Not enough yen — need {yen(cost)}.", show_alert=True)
+            return
+        db.set_bound_tier(uid, nt)
+        safe(bot.answer_callback_query, call.id, f"🔼 Bound upgraded — tier {nt} now active.")
+        _refresh_bound(call)
+        return
+
+    safe(bot.answer_callback_query, call.id)
+    _refresh_bound(call)
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "skillslot")
+def skillslot_cb(call):
+    seen(call)
+    uid = call.from_user.id
+    slots = db.get_skill_slots(uid)
+    if slots >= MAX_SKILL_SLOTS:
+        safe(bot.answer_callback_query, call.id, "Skill slots are maxed out.", show_alert=True)
+        return
+    if not db.spend_yen(uid, SKILL_SLOT_COST, "extra skill slot"):
+        safe(bot.answer_callback_query, call.id, f"Not enough yen — need {yen(SKILL_SLOT_COST)}.", show_alert=True)
+        return
+    db.set_skill_slots(uid, slots + 1)
+    safe(bot.answer_callback_query, call.id, f"⚡ Second skill slot unlocked ({slots + 1}/{MAX_SKILL_SLOTS} per match).")
+    own = db.owned_by(uid)
+    if own and call.message:
+        _edit_kit_page(call, uid, own["char_key"])
 
 
 # ------------------------------------------------------------------ shop
