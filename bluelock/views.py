@@ -581,7 +581,10 @@ def kit_page(user_id: int, char_key: str) -> tuple[str, types.InlineKeyboardMark
             kb.add(types.InlineKeyboardButton(
                 f"🔓 {ab.name} · Lv{need_lv}", callback_data=f"unlock|{ab.id}"
             ))
-    kb.add(types.InlineKeyboardButton("🔄 Refresh", callback_data=f"kitrefresh|{char_key}"))
+    kb.row(
+        types.InlineKeyboardButton("🔄 Refresh", callback_data=f"kitrefresh|{char_key}"),
+        types.InlineKeyboardButton("↩️ Back", callback_data="kitback"),
+    )
     slots = db.get_skill_slots(user_id)
     parts = []
     parts.append(RULE)

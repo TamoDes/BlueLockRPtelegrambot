@@ -157,7 +157,7 @@ BOUND_TIER_COST = {2: 1_500_000, 3: 4_000_000}
 
 # ── skill slots: 1 usable skill per match at first, buy the 2nd ────────────
 MAX_SKILL_SLOTS = 2
-SKILL_SLOT_COST = 2_000_000
+SKILL_SLOT_COST = 5_000_000
 
 SIZES = (1, 2, 3, 4, 5)
 MODES = {"ranked": "Ranked"}

@@ -675,6 +675,34 @@ def openkit_cb(call):
     safe(bot.answer_callback_query, call.id)
 
 
+def _profile_kb(uid: int) -> types.InlineKeyboardMarkup:
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        types.InlineKeyboardButton("🃏 Quick Card", callback_data=f"card|{uid}"),
+        types.InlineKeyboardButton("⚡ My Kit", callback_data="openkit"),
+        types.InlineKeyboardButton("💪 Shop / Train", callback_data="shopopen"),
+        types.InlineKeyboardButton("💰 History", callback_data="mytx"),
+    )
+    return kb
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "kitback")
+def kitback_cb(call):
+    """↩️ Back from My Kit → the profile card."""
+    seen(call)
+    safe(bot.answer_callback_query, call.id)
+    row = db.player(call.from_user.id)
+    if not row or not call.message:
+        return
+    safe(
+        bot.edit_message_text,
+        views.profile_text(row),
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=_profile_kb(call.from_user.id),
+    )
+
+
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("train|"))
 def train_cb(call):
     seen(call)
