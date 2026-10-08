@@ -351,6 +351,13 @@ def stage(mid: int, holder_slot: int, **kw) -> None:
     db.update_match(mid, pending=json.dumps(state), phase="opening", holder=holder_slot)
 
 
+def stage_play(mid: int, holder_slot: int, **kw) -> None:
+    """Same reset as stage() but leaves the match claimable (phase='play')."""
+    state = engine.fresh_state()
+    state.update(kw)
+    db.update_match(mid, pending=json.dumps(state), phase="play", holder=holder_slot)
+
+
 taker = next(r for r in db.roster(pm_match) if r["user_id"] == 101)
 
 stage(pm_match, taker["slot"], set_piece="penalty", zone=ZONE_BOX)
@@ -823,6 +830,31 @@ out = roll_and_resolve(mid5, att=6, dfn=1, gk=6)
 assert out["gk_total_eff"] == out["gk_total"] - 2, (out.get("gk_total_eff"), out["gk_total"])
 assert any("Devil's Pulse" in n for n in out.get("notes", []))
 print("ok  shidou gk_down:", out["gk_total"], "->", out["gk_total_eff"])
+
+# S6b: keeper aura — free forever is gone; armed, it lifts the keeper ONCE
+gg_u = make_user("gagamaru")
+mA = build_match([(def_u, gg_u)])   # Wanima shoots, Gagamaru keeps
+wA, gA = slot_of(mA, def_u), slot_of(mA, gg_u)
+for _x in abilities.starter_ids("gagamaru"):
+    db.grant_unlock(gg_u, _x)
+stage_play(mA, wA, zone=ZONE_SHOOT, beaten=[])
+mA_row = db.match(mA)
+assert db.claim_turn(mA, mA_row["turn"], mA_row["holder"])
+engine.open_duel(mA, "shoot", None)
+outA = roll_and_resolve(mA, att=6, dfn=1, gk=1)
+assert not outA.get("gk_aura"), "unarmed aura must stay idle"
+assert "gagamaru_p1" not in engine.pending_of(db.match(mA)).get("used", [])
+stage_play(mA, wA, zone=ZONE_SHOOT, beaten=[])
+assert engine.arm_skill(mA, gg_u, "gagamaru_p1")["status"] == "armed"
+mA_row = db.match(mA)
+assert db.claim_turn(mA, mA_row["turn"], mA_row["holder"])
+engine.open_duel(mA, "shoot", None)
+outA = roll_and_resolve(mA, att=6, dfn=1, gk=1)   # past the wall -> keeper faces it
+assert outA.get("gk_aura") == 1, outA
+assert outA["gk_total_eff"] == outA["gk_total"] + 1, (outA.get("gk_total_eff"), outA.get("gk_total"))
+stA = engine.pending_of(db.match(mA))
+assert "gagamaru_p1" in stA.get("used", []), "the aura burns its one charge"
+print("ok  keeper aura: unarmed idle -> armed +1 once -> charge burned")
 
 # S7: Direct free kick faces the keeper alone (wall removed)
 rin2 = rin_u
@@ -1572,12 +1604,6 @@ print("ok  Last Puzzle: a die-1 shot past a die-6 keeper still goes in")
 # S23b: Chemical Reaction removed — Isagi keeps no bound ability
 assert "isagi_bp" not in abilities.REGISTRY
 print("ok  Chemical Reaction removed — isagi has no bound ability")
-
-
-def stage_play(mid: int, holder_slot: int, **kw) -> None:
-    state = engine.fresh_state()
-    state.update(kw)
-    db.update_match(mid, pending=json.dumps(state), phase="play", holder=holder_slot)
 
 
 # S23c: Last Puzzle STEALS the ball the moment he arms it — no holder, no problem

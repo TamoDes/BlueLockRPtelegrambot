@@ -117,7 +117,8 @@ _KITS: list[tuple[str, list]] = [
             "Shot scores even if the keeper is within 1 of his total.",
             save_margin=1, when=lambda c: c["action"] == "shoot"),
         Ability("kaiser_p3", "kaiser", "passive", 3, "Emperor's Court",
-            "+1 Shot; team keeper plays +1 while he's on.",
+            "+1 Shot when armed on his own play; or arm it defending and the "
+            "team keeper plays +1 on the shot he faces (burns the charge).",
             att=lambda c: 1 if c["action"] == "shoot" else 0, aura_gk=1),
         Ability("kaiser_s3", "kaiser", "skill", 4, "Kaiser Impact: Magnus",
             "Keeper −3 against his shot.",
@@ -428,7 +429,8 @@ _KITS: list[tuple[str, list]] = [
             att=lambda c: 2 if c["action"] == "shoot" else 0, gk_down=2,
             when=lambda c: c["action"] == "shoot" and _losing(c)),
         Ability("kunigami_p3", "kunigami", "passive", 3, "Hero's Banner",
-            "+1 Shot; team keeper plays +1 while he's on.",
+            "+1 Shot when armed on his own play; or arm it defending and the "
+            "team keeper plays +1 on the shot he faces (burns the charge).",
             att=lambda c: 1 if c["action"] == "shoot" else 0, aura_gk=1),
         Ability("kunigami_s3", "kunigami", "skill", 4, "Wild Hero Strike",
             "While trailing by one: shot +2 and the keeper's die is erased (−6).",
@@ -465,7 +467,8 @@ _KITS: list[tuple[str, list]] = [
     ]),
     ("gagamaru", [
         Ability("gagamaru_p1", "gagamaru", "passive", 1, "Instinct Guard",
-            "Team keeper plays +1 while he's on the pitch.",
+            "Arm it (anytime, even mid-duel): the team keeper plays +1 on the "
+            "shot he faces. Burns the charge.",
             aura_gk=1),
         Ability("gagamaru_s1", "gagamaru", "skill", 1, "Beast Reflex",
             "Shuts down an opponent with no roll.",
@@ -477,7 +480,8 @@ _KITS: list[tuple[str, list]] = [
             "Claims his keeper's punched ball for his team.",
             punch_to_self=True),
         Ability("gagamaru_p3", "gagamaru", "passive", 3, "Beast Mode",
-            "+1 Meta Vision defense; team keeper +1 aura (stacks with Instinct Guard).",
+            "+1 Meta Vision defense when armed marking; or arm it and the team "
+            "keeper plays +1 on the shot he faces (burns the charge).",
             dfd=lambda c: 1, aura_gk=1),
         Ability("gagamaru_s3", "gagamaru", "skill", 4, "Guardian Territory",
             "One defensive stand with +3 Meta Vision.",

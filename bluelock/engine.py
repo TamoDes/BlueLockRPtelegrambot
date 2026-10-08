@@ -675,15 +675,6 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             duel["defender"] = by_slot[w]["slot"]
             break
 
-    if action in KEEPER_ACTIONS or action == "penalty":
-        aura = sum(
-            ab.aura_gk
-            for r in roster if r["team"] == defender_team(actor)
-            for ab in abilities.kit_of(kits, r)
-            if ab.kind == "passive" and ab.aura_gk
-        )
-        duel["gk_power"] += aura
-
     if action == "penalty":
         keeper_captain = team_captain(roster, defender_team(actor))
         duel["spotter"] = keeper_captain["slot"] if keeper_captain else None
@@ -1118,7 +1109,7 @@ def arm_skill(match_id: int, user_id: int, ability_id: str,
 
 def is_defensive(ab) -> bool:
     return (ab.auto == "stop" or ab.punch_to_self or ab.dfd is not None
-            or ab.first_free or ab.contest is not None)
+            or ab.first_free or ab.contest is not None or bool(ab.aura_gk))
 
 
 def _snapshot(duel: dict, actor, defender, zone: int) -> dict:
@@ -1595,9 +1586,25 @@ def resolve(match_id: int) -> dict | None:
             margin = margin or shot_ab.save_margin
             tie = tie or bool(shot_ab.tie_win)
             abilities.note(state, actor["name"], shot_ab, "ultimate strike" if down >= 3 else "clinical finish")
-        eff_gk_total = total(duel, "gk") - down
-        if down:
+        # keeper aura passives: armed by the defending side (mid-duel too) and
+        # burned on the shot they actually lift the keeper against
+        aura = 0
+        for r in roster:
+            if r["team"] != defender_team(actor) or r["user_id"] is None:
+                continue
+            au = abilities.peek_armed(state, r["slot"])
+            if au is None or not au.aura_gk:
+                continue
+            if not _gated(au, _uctx(r, actor)):
+                continue
+            abilities.spend_armed(state, r["slot"])
+            aura += au.aura_gk
+            abilities.note(state, r["name"], au, f"keeper +{au.aura_gk}", icon="🧤")
+        eff_gk_total = total(duel, "gk") - down + aura
+        if down or aura:
             out["gk_total_eff"] = eff_gk_total
+        if aura:
+            out["gk_aura"] = aura
         att_t = out["att_total"]
         won = att_t > eff_gk_total
         if not won and tie and att_t == eff_gk_total:
