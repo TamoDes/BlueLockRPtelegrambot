@@ -25,9 +25,11 @@ from .abilities import (
 _KITS: list[tuple[str, list]] = [
     ("isagi", [
         Ability("isagi_p1", "isagi", "passive", 1, "Last Puzzle",
-            "Reads the field and gets on the end of it: the pass line is beaten, "
-            "the keeper cannot save it, and he takes +2. Works off a loose ball too.",
+            "The moment he arms it he takes the ball — even off a loose one or "
+            "the opponent's feet — and the shot that follows cannot be stopped: "
+            "no wall, no keeper. He takes +2 on it.",
             att=lambda c: 2 if c["action"] == "shoot" else 0, sure_goal=True,
+            steal_on_arm=True,
             when=lambda c: c["action"] == "shoot"),
         Ability("isagi_s1", "isagi", "skill", 1, "Meta Vision Read",
             "While marking: intercept an opponent pass with no roll.",
@@ -1826,7 +1828,6 @@ _PAIRS: dict[str, tuple[str, str]] = {
     "igaguri": ("Tryhard Pact", "a"),
     "igarashi": ("Hustle Pact", "a"),
     "iglesias": ("Rabbit Dash", "a"),
-    "isagi": ("Chemical Reaction", "ad"),
     "ishikari": ("Frame Vow", "d"),
     "kaiser": ("Emperor's Decree", "ad2"),
     "karasu": ("Crow's Read", "d"),

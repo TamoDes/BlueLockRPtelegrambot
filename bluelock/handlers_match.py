@@ -659,6 +659,12 @@ def skill_cb(call):
     )
     if res["status"] in ("armed", "disarmed"):
         ab = abilities.get(aid)
+        if res.get("stole"):
+            broadcast(
+                db.match(match_id),
+                f"🧠 <b>{esc(res.get('you') or '?')}</b> reads the game and takes the ball! "
+                f"🛡 <b>{esc(res.get('name') or '')}</b> is armed.",
+            )
         if ab:
             skill_ctx = views.skill_hint(match_id, call.from_user.id, ab)
             if skill_ctx:

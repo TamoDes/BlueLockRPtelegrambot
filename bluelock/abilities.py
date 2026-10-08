@@ -61,6 +61,9 @@ class Ability:
     # Isagi's Last Puzzle: he has already read the field and got on the end of
     # it — the wall cannot stop him and the keeper cannot save it.
     sure_goal: bool = False
+    # Arming takes possession the moment the button is pressed — even off a
+    # loose ball / the opponent's feet — then the action plays as his own.
+    steal_on_arm: bool = False
     contest: Optional[dict] = None
     # On a SUCCESSFUL move the actor carries past up to `through` more
     # opponents. The attack die sets how many (capped), so the count really
@@ -330,6 +333,15 @@ def consume(state: dict, ab: Ability) -> None:
     charges[ab.id] = left
     if left <= 0:
         state.setdefault("used", []).append(ab.id)
+
+
+def refund(state: dict, ab: Ability) -> None:
+    """Give a charge back — used when a duel is undone before it resolved."""
+    used = state.get("used", [])
+    if ab.id in used:
+        used.remove(ab.id)
+    charges = state.setdefault("charges", {})
+    charges[ab.id] = charges.get(ab.id, 0) + 1
 
 
 def arm(state: dict, slot: int, ab: Ability) -> None:

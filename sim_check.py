@@ -701,6 +701,17 @@ assert opened["duel"].get("auto") == {"t": "win", "slot": rs, "aid": "rin_p1"}, 
     "manually-armed passive must fire", opened["duel"].get("auto"))
 engine.cancel_duel(mid)
 st = engine.pending_of(db.match(mid))
+assert st["charges"]["rin_p1"] == 1, "undo gives the fired charge back"
+assert "rin_p1" not in st.get("used", []), "and the passive is ready to arm again"
+
+# fire it again and LET IT RESOLVE — now the charge burns for good
+restage(mid, rs, zone=0)
+do_arm(mid, rs, "rin_p1")
+opened = engine.open_duel(mid, "pass", mate)
+assert opened["duel"].get("auto") == {"t": "win", "slot": rs, "aid": "rin_p1"}
+out = roll_and_resolve(mid)
+assert out is not None and out.get("outcome") == "pass_ok", out
+st = engine.pending_of(db.match(mid))
 assert st["charges"]["rin_p1"] == 0, "one-charge passive: the fired charge is spent"
 assert "rin_p1" in st["used"], "spent passive moves to used"
 
@@ -711,7 +722,7 @@ assert all(a != "rin_p1" for a, _ in opened["duel"].get("att_boosts", [])), \
     "spent passive must not boost again"
 engine.cancel_duel(mid)
 assert engine.arm_skill(mid, rin_u, "rin_p1")["status"] == "spent"
-print("ok  passives fire on their own: one charge per match, tagged on the duel line")
+print("ok  passives fire on their own: one charge per match, undo refunds a cancelled fire")
 
 # S2: Last Puzzle — he reads it, gets on the end of it and finishes. Only a
 # shot makes him move; anything else leaves the charge untouched.
@@ -889,7 +900,7 @@ assert (lv2, lv3, lv4) == (
     config.ABILITY_T2_LEVEL, config.ABILITY_T3_LEVEL, config.ABILITY_T4_LEVEL
 )
 assert cost2 < cost3 < cost4
-assert len(abilities.kit_for_char("isagi")) == 4  # 3 kit (1 passive + 2 skills) + 1 bound
+assert len(abilities.kit_for_char("isagi")) == 3  # 1 passive + 2 skills — no bound anymore
 fresh = make_user("sae")
 starters = abilities.starter_ids("sae")
 assert abilities.owned_ids(fresh, "sae") == starters
@@ -1557,6 +1568,63 @@ out = roll_and_resolve(mI, att=1, gk=6)
 assert out["outcome"] == "goal", out
 assert out.get("sure_goal"), out
 print("ok  Last Puzzle: a die-1 shot past a die-6 keeper still goes in")
+
+# S23b: Chemical Reaction removed — Isagi keeps no bound ability
+assert "isagi_bp" not in abilities.REGISTRY
+print("ok  Chemical Reaction removed — isagi has no bound ability")
+
+
+def stage_play(mid: int, holder_slot: int, **kw) -> None:
+    state = engine.fresh_state()
+    state.update(kw)
+    db.update_match(mid, pending=json.dumps(state), phase="play", holder=holder_slot)
+
+
+# S23c: Last Puzzle STEALS the ball the moment he arms it — no holder, no problem
+def recharge(mid: int, slot: int, aid: str, n: int = 1) -> None:
+    st = engine.pending_of(db.match(mid))
+    st.setdefault("charges", {})[aid] = n
+    st["used"] = [u for u in st.get("used", []) if u != aid]
+    st.get("armed", {}).pop(str(slot), None)
+    db.update_match(mid, pending=json.dumps(st))
+
+
+mS = build_match([(def_u, isagi_u)])   # Wanima holds; Isagi is on the other team
+sS = slot_of(mS, isagi_u)
+wS = slot_of(mS, def_u)
+for _x in abilities.starter_ids("isagi"):
+    db.grant_unlock(isagi_u, _x)
+stage_play(mS, wS, zone=1, beaten=[])
+recharge(mS, sS, "isagi_p1")
+resS = engine.arm_skill(mS, isagi_u, "isagi_p1")
+assert resS["status"] == "armed" and resS.get("stole"), resS
+assert db.match(mS)["holder"] == sS, "arming Last Puzzle takes the ball"
+mS2 = db.match(mS)
+assert db.claim_turn(mS, mS2["turn"], mS2["holder"])
+engine.open_duel(mS, "shoot", None)
+stS = engine.pending_of(db.match(mS))
+assert stS["duel"].get("sure_goal"), stS["duel"].get("auto")
+outS = roll_and_resolve(mS, att=1, gk=6)
+assert outS["outcome"] == "goal", outS
+print("ok  Last Puzzle: arm without the ball -> he takes it -> the shot is unsaveable")
+
+# S23d: undo gives the burned charge back
+mU = build_match([(isagi_u, def_u)])
+sU = slot_of(mU, isagi_u)
+stage_play(mU, sU, zone=1, beaten=[])
+recharge(mU, sU, "isagi_p1")
+assert engine.arm_skill(mU, isagi_u, "isagi_p1")["status"] == "armed"
+mU2 = db.match(mU)
+assert db.claim_turn(mU, mU2["turn"], mU2["holder"])
+engine.open_duel(mU, "shoot", None)
+stU = engine.pending_of(db.match(mU))
+assert "isagi_p1" in stU.get("used", []), "the duel burned the charge"
+engine.cancel_duel(mU)
+stU = engine.pending_of(db.match(mU))
+assert "isagi_p1" not in stU.get("used", []), "undo must give the charge back"
+assert stU["charges"].get("isagi_p1", 0) >= 1, stU.get("charges")
+assert db.match(mU)["phase"] == "play"
+print("ok  undo: a cancelled duel refunds the passive charge it burned")
 
 # S24: keeper spills it — a passive tuned to the loose ball beats the coin flip
 sae_u = fresh  # the sae owner the suite already made

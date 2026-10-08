@@ -410,6 +410,23 @@ def action_keyboard(match, roster) -> types.InlineKeyboardMarkup:
 
     if match["phase"] == "duel":
         kb.add(types.InlineKeyboardButton("✋ Undo action", callback_data=f"undo|{mid}"))
+        # defensive kit stays reachable mid-duel — arm the stop before the roll
+        for row in roster:
+            if row["user_id"] is None:
+                continue
+            armed_id = state.get("armed", {}).get(str(row["slot"]))
+            for sk in ready_skills(row, state):
+                if not engine.is_defensive(sk):
+                    continue
+                icon = abilities.icon_for(sk)
+                if sk.id == armed_id:
+                    label = f"{icon} {sk.name} ✅ armed — tap to cancel"
+                elif sk.kind == "passive":
+                    left = state.get("charges", {}).get(sk.id, abilities.PASSIVE_CHARGES)
+                    label = f"{icon} {sk.name} ×{max(1, left)}"
+                else:
+                    label = f"{icon} {sk.name}"
+                kb.add(types.InlineKeyboardButton(label, callback_data=f"skill|{mid}|{sk.id}"))
         return kb
 
     holder = next((r for r in roster if r["slot"] == match["holder"]), None)
@@ -465,7 +482,7 @@ def skill_usable_here(match, roster, row, ab, state) -> bool:
     holder = match["holder"]
     is_holder = holder == row["slot"]
     defensive = engine.is_defensive(ab)
-    if not is_holder and not defensive:
+    if not is_holder and not defensive and not ab.steal_on_arm:
         return False
     if ab.when is None:
         return True

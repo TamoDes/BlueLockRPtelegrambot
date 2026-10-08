@@ -402,6 +402,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
     kits = abilities.kits_by_user(roster)
     att_kit = abilities.kit_of(kits, actor)
     beaten = state.get("beaten", [])
+    used_before = set(state.get("used", []))
     direct_piece = set_piece and action != "cross"
     wall: list[int] = []
     if direct_piece:
@@ -699,6 +700,12 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                                "penalty erased — no guess needed", icon="🧤")
 
     state["duel"] = duel
+    # charges burned building this duel go back to the player if he undoes it
+    _burned = [i for i in state.get("used", []) if i not in used_before]
+    if _burned:
+        state["duel_spent"] = _burned
+    else:
+        state.pop("duel_spent", None)
     notes_out = state.pop("notes", [])
     with db.tx() as c:
         cur = c.execute(
@@ -734,6 +741,11 @@ def cancel_duel(match_id: int) -> None:
         ]
         if not state["pending_goals"]:
             state.pop("pending_goals", None)
+    # the charges this duel burned come back — nothing fired
+    for _aid in state.pop("duel_spent", []) or []:
+        _ab = abilities.get(_aid)
+        if _ab is not None:
+            abilities.refund(state, _ab)
     _drop_auto_armed(state)
     db.update_match(match_id, phase="play", pending=json.dumps(state))
 
@@ -1083,11 +1095,25 @@ def arm_skill(match_id: int, user_id: int, ability_id: str,
                 current.pop(mine_key, None)
             else:
                 return {"status": "swap", "name": other.name if other else "?"}
-        if not is_holder and not is_defensive(ab):
+        if not is_holder and not is_defensive(ab) and not ab.steal_on_arm:
             return {"status": "notturn", "name": ab.name}
         current[mine_key] = ability_id
+        stole = False
+        if ab.steal_on_arm and match["phase"] == "play" and not is_holder:
+            holder_row = next((r for r in roster if r["slot"] == holder_slot), None)
+            if holder_row is None or holder_row["team"] != me["team"]:
+                # the read lands the instant he arms it — the ball is his now
+                c.execute("UPDATE matches SET holder=? WHERE id=?", (me["slot"], match_id))
+                state["beaten"] = []
+                state["last_pass"] = None
+                state["chain"] = 0
+                stole = True
         c.execute("UPDATE matches SET pending=? WHERE id=?", (json.dumps(state), match_id))
-        return {"status": "armed", "name": ab.name, "kind": ab.kind}
+        out = {"status": "armed", "name": ab.name, "kind": ab.kind}
+        if stole:
+            out["stole"] = True
+            out["you"] = me["name"]
+        return out
 
 
 def is_defensive(ab) -> bool:
