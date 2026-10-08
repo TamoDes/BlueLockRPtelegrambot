@@ -48,6 +48,21 @@ def auto_fill(match, pending: dict) -> bool:
         db.log_event(match_id, f"⏱ Bot rolled <b>{value}</b> for <b>{name}</b> (AFK).")
         return True
 
+    if role in ("contest_set", "contest_call"):
+        cfg = (pending.get("duel") or {}).get("contest") or {}
+        opts = engine.contest_opts(cfg, role)
+        if not opts:
+            return False
+        choice = random.choice(opts)[0]
+        submit = engine.submit_contest_set if role == "contest_set" else engine.submit_contest_call
+        result = submit(match_id, user_id, choice)
+        if result.get("status") != "ok":
+            return False
+        what = "hid a move" if role == "contest_set" else "called the move"
+        broadcast(match, f"⏱ <b>{name}</b> was AFK — the bot {what} for them.")
+        db.log_event(match_id, f"⏱ Bot played the contest for <b>{name}</b> (AFK).")
+        return True
+
     if role == "spot":
         corner = random.choice(PENALTY_TARGETS)
         result = engine.submit_spot(match_id, user_id, corner)

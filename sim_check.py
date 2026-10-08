@@ -1446,7 +1446,7 @@ for uid, aid, ch, ruid, bname, a_amt, b_amt in (
 print("ok  Winning Movement / French Pass: receiver buff lands even though the charge burns")
 
 # S19: the goal payout SPANS actions — Sae's pass sets up a goal that only
-# lands on a later action (Taha: "اگ گل زد که یارش و خود سا مثبت 1 میگیرن")
+# lands on a later action (Sae and his mate both get +1)
 mG2 = build_match([(fresh, def_u), (rin_u, def_u2)])
 sS2, rS2 = slot_of(mG2, fresh), slot_of(mG2, rin_u)
 for _x in abilities.starter_ids("sae"):
@@ -1474,7 +1474,7 @@ assert (sS2, 1, "sae_p1") in paid, ("Sae is owed +1", paid)
 assert (rS2, 1, "sae_p1") in paid, ("the scorer is owed +1", paid)
 print("ok  goal payout spans actions: Sae's pass -> later goal -> both take +1")
 
-# S20: "از بین یک الی ۳ نفر" — the carry walks past several opponents at once,
+# S20: through 1..3 — the carry walks past several opponents at once,
 # and every one of them eats Emperor's -1.
 mT = build_match([(kaiser_u, def_u), (isagi_u, def_u2)])
 sT = slot_of(mT, kaiser_u)

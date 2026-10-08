@@ -506,7 +506,7 @@ def bind_cb(call):
 
     if act == "set" and len(part) > 2:
         if not BOUND_ENABLED:
-            safe(bot.answer_callback_query, call.id, "⏸ Bound is غیرفعال in this test season.", show_alert=True)
+            safe(bot.answer_callback_query, call.id, "⏸ Bound is disabled in this test season.", show_alert=True)
             return
         try:
             target = int(part[2])
@@ -529,7 +529,7 @@ def bind_cb(call):
 
     if act == "up":
         if not BOUND_ENABLED:
-            safe(bot.answer_callback_query, call.id, "⏸ Bound is غیرفعال in this test season.", show_alert=True)
+            safe(bot.answer_callback_query, call.id, "⏸ Bound is disabled in this test season.", show_alert=True)
             return
         own = db.owned_by(uid)
         tier = db.get_bound_tier(uid)

@@ -102,6 +102,14 @@ def zone_of(match) -> int:
     return pending_of(match).get("zone", 0)
 
 
+def stale_since(state: dict, match) -> int | None:
+    """Seconds the match has waited on the same turn — None if unknown/mismatched."""
+    stamp = state.get("stamp") or {}
+    if not stamp or stamp.get("turn") != match["turn"]:
+        return None
+    return max(0, db.now() - int(stamp.get("at", 0)))
+
+
 def fresh_state() -> dict:
     return {
         "zone": 0,
@@ -114,6 +122,7 @@ def fresh_state() -> dict:
         "lines": {},
         "last_holder": None,
         "charges": {},
+        "stamp": {},
     }
 
 
@@ -175,6 +184,7 @@ def start(match_id: int) -> bool:
     if opener_team is not None:
         mates = [r for r in roster if r["team"] == opener_team]
         opener = min(mates, key=lambda r: (-deep.get(r["slot"], line_of(r)), r["slot"]))
+    state["stamp"] = {"turn": 1, "at": db.now()}
     db.update_match(
         match_id,
         phase="play",
@@ -503,7 +513,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                 # any goal it scored) — stash it so the spent charge still counts.
                 if armed.beats and action in ("dribble", "shoot"):
                     state["pending_beats"] = {"amt": armed.beats, "src": armed.id}
-                # "از بین یک الی N نفر": a threaded shot faces at most N of the
+                # A threaded shot faces at most N of the
                 # wall — he slips past the rest, who are tagged for the `beats`
                 # payout instead of being rolled. A carry/pass picks its count at
                 # resolve() from the attack die (1..N).
@@ -523,7 +533,7 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                     state["beat_gk"] = {"slot": actor["slot"], "src": armed.id}
                 if armed.dribble_stack and val:
                     # Monster mode starts on this dribble; every one after it
-                    # tops the stack up (Taha: "هر دریبل +۱ موقتی").
+                    # tops the stack up (+1 until the next goal).
                     state["monster"] = {"slot": actor["slot"], "amt": 0, "src": armed.id}
                 # Sae / Charles carry an attack bonus AND a receiver buff. The
                 # bonus lands here and burns the charge, so the receiver buff
@@ -1295,9 +1305,9 @@ def resolve(match_id: int) -> dict | None:
             s for s in state.get("streaks", [])
             if s.get("kind") != "reward" and s.get("slot") != actor["slot"]
         ]
-        # Passive goal payout (Taha's "اگ گل شد ... میگیره"): owed to the owner
-        # once his team scores. Granted AFTER the sweep so it survives this goal
-        # and the next one wipes it. The pendings are dropped either way.
+        # Passive goal payout: owed to the owner once his team scores.
+        # Granted AFTER the sweep so it survives this goal and the next one
+        # wipes it. The pendings are dropped either way.
         for pg in state.pop("pending_goals", []):
             _owner = by_slot.get(pg.get("owner"))
             if _owner is not None and _owner["team"] == actor["team"]:
@@ -1659,8 +1669,8 @@ def resolve(match_id: int) -> dict | None:
             and actor["slot"] == state["puppet"].get("mate"):
         puppet_take(min(ZONE_BOX, zone + 1))
 
-    # --- "از بین یک الی N نفر" — leftovers of a threaded shot are already tagged
-    # at open_duel; a carry/pass rolls its band NOW (attack die, capped by
+    # --- Threaded move (through 1..N) — leftovers of a threaded shot are already
+    # tagged at open_duel; a carry/pass rolls its band NOW (attack die, capped by
     # `through`) and the extras join `beaten` so the debuff below reaches them.
     if out.get("outcome") in ("goal", "dribble_ok", "pass_ok"):
         _take = list(duel.get("through_extra") or [])
@@ -1682,13 +1692,13 @@ def resolve(match_id: int) -> dict | None:
 
     # --- Emperor (Kaiser): everyone he shot past takes -1 until the next goal.
     # Paid out HERE — after any goal the shot just scored — so the debuff is
-    # dealt on the goal and survives it (Taha: "تا گل بعدی", any goal clears it).
+    # dealt on the goal and survives it (any goal clears it).
     state.pop("pending_hold", None)   # never won the ball → never paid
     pb = state.pop("pending_beats", None)
     if pb:
         _pb_ab = abilities.get(pb.get("src", ""))
         # everyone THIS move put on the floor — wall roll, marker, or the
-        # "از بین N نفر" band. Already-beaten players keep their old tag.
+        # through band. Already-beaten players keep their old tag.
         _targets = [s for s in beaten
                     if s not in beaten_before and s != actor["slot"]]
         for _slot in _targets:

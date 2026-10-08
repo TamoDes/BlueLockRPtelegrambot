@@ -622,7 +622,7 @@ def bound_page(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
         kb = types.InlineKeyboardMarkup(row_width=1)
         kb.add(types.InlineKeyboardButton("🔄 Refresh", callback_data="bnd|page"))
         text = (
-            "🔗 <b>BOUND</b> — ⏸ <b>غیرفعال</b>\n"
+            "🔗 <b>BOUND</b> — ⏸ <b>DISABLED</b>\n"
             f"{RULE}\n"
             "<i>The Bound system is off for this test season. "
             "Partners, tiers and upgrades will activate when the season starts.</i>"

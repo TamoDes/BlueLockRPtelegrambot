@@ -388,6 +388,7 @@ def advance(match_id: int) -> None:
                     return
                 render_match(match_id)
                 continue
+            stamp_pending_turn(match, engine.pending_of(match))
             render_match(match_id)
             prompt_dice(match_id)
             return
@@ -414,8 +415,18 @@ def advance(match_id: int) -> None:
         if engine.over(match):
             finish(match_id)
         else:
+            stamp_pending_turn(match, engine.pending_of(match))
             render_match(match_id)
         return
+
+
+def stamp_pending_turn(match, state: dict) -> None:
+    """Record when this waiting state began — feeds the auto-roll timer."""
+    stamp = state.get("stamp") or {}
+    if stamp.get("turn") == match["turn"] and stamp.get("at"):
+        return
+    state["stamp"] = {"turn": match["turn"], "at": db.now()}
+    db.update_match(match["id"], pending=json.dumps(state))
 
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("advance|"))
@@ -466,6 +477,7 @@ def advance_cb(call):
     if engine.over(match):
         finish(match_id)
     else:
+        stamp_pending_turn(match, engine.pending_of(match))
         render_match(match_id)
     safe(bot.answer_callback_query, call.id)
 

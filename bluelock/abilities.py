@@ -56,37 +56,36 @@ class Ability:
     pass_buff: int = 0
     # Every player the actor beat PAST takes this amount until the next goal.
     # Applied at the end of resolve() (after any goal he scored), so the
-    # debuff survives the goal it was dealt on — Taha: "تا گل بعدی".
+    # debuff survives the goal it was dealt on.
     beats: int = 0
     # Isagi's Last Puzzle: he has already read the field and got on the end of
     # it — the wall cannot stop him and the keeper cannot save it.
     sure_goal: bool = False
     contest: Optional[dict] = None
-    # "از بین یک الی N نفر": on a SUCCESSFUL move the actor carries past up to
-    # `through` more opponents. The attack die sets how many (capped), so the
-    # count really lands in the 1..N band. Those opponents are marked beaten
-    # alongside the normal marker, so `beats` hits every one of them too.
+    # On a SUCCESSFUL move the actor carries past up to `through` more
+    # opponents. The attack die sets how many (capped), so the count really
+    # lands in the 1..N band. Those opponents are marked beaten alongside the
+    # normal marker, so `beats` hits every one of them too.
     through: int = 0
-    # Goal payout (Taha's "اگ گل شد ... میگیره"): stashed when the passive
-    # fires, paid at the NEXT goal by the owner's team, then cleared. `self` is
-    # for the owner; `mate` for the other party of the move (the assister when
-    # he scored, the scorer when he assisted).
+    # Goal payout: stashed when the passive fires, paid at the NEXT goal by
+    # the owner's team, then cleared. `self` is for the owner; `mate` for the
+    # other party of the move (the assister when he scored, the scorer when he
+    # assisted).
     goal_self: int = 0
     goal_mate: int = 0
     # A keeper who does not hold on to it: whoever owns this comes for the loose
-    # ball instead of the coin flip (Taha: "لوز شد ... میاد").
+    # ball instead of the coin flip.
     on_ball_loose: bool = False
-    # ...and this one finishes it outright instead of just collecting it
-    # ("گل گارانتی میزنه").
+    # ...and this one finishes it outright instead of just collecting it.
     finish_loose: bool = False
     # Monster Moment: each dribble he lands tops up a stack that rides on every
     # action of his until the next goal wipes it.
     dribble_stack: int = 0
     # Knight Defense: paid when he wins the ball, rides his possession and dies
-    # with it (Taha: "تا زمانی که توپ دستشه").
+    # with it.
     hold_bonus: int = 0
     # Dance: the run he starts on his dribble ends with him walking past the
-    # keeper too (Taha: "حتی میتونه گلر").
+    # keeper too.
     beat_keeper: bool = False
     aura_gk: int = 0
     gamble: bool = False

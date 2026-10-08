@@ -5,6 +5,7 @@ import time
 
 from bluelock import bot, db
 from bluelock import abilities as abilities_mod
+from bluelock import autoturn
 from bluelock.config import (
     ADMIN_IDS,
     ADMINS,
@@ -38,6 +39,12 @@ def sweep_lobbies() -> int:
 def sweep_loop() -> None:
     while True:
         time.sleep(TURN_SWEEP_SECONDS)
+        try:
+            rolled = autoturn.sweep_auto_rolls()
+            if rolled:
+                logger.info("auto-rolled for %d AFK player(s)", rolled)
+        except Exception:
+            logger.exception("auto-roll sweep failed")
         if time.monotonic() % LOBBY_SWEEP_SECONDS < TURN_SWEEP_SECONDS:
             try:
                 swept = sweep_lobbies()
