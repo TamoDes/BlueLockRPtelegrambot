@@ -104,7 +104,7 @@ def rules_text() -> str:
         "\nWrong corner → goal. Read corner → <b>always kept out</b>."
         + "\n\n🛡 <b>Passives</b> — <b>tap to arm</b> (they never fire on their own), <b>one charge</b> per match, always free."
         "\n⚡ <b>Skills</b> = one per match (2 with an extra skill slot); arm with the ⚡ button. 🎲 <b>Gamble</b> = the die decides."
-        + quote("Every character fields six abilities — two innate, four earned through levels and yen. Full details in /abilities.")
+        + quote("Every character fields four abilities — two innate, two earned through levels and yen. Full details in /abilities.")
         + "\n🏃 <b>Rotation</b> — every goal turns the positions, volleyball style: the back line steps forward."
         + "\n🏁 Ranked races to <b>3</b>. Friendly matches run the clock."
     )
@@ -347,10 +347,13 @@ def duel_board(match, roster) -> str:
         prompt = f"🎯 <b>{who}</b> — pick your corner."
     elif role == "spot_gk":
         prompt = f"🧤 Defending captain <b>{who}</b> — where's he shooting?"
-    elif role == "bluff_set":
-        prompt = f"🃏 <b>{who}</b> — call one of your three dice real."
-    elif role == "bluff":
-        prompt = f"🃏 <b>{who}</b> — which of his three dice is real?"
+    elif role in ("contest_set", "contest_call"):
+        if role == "contest_set":
+            prompt = f"🃏 <b>{who}</b> — locks in a hidden move…"
+        elif engine.contest_side(duel.get("contest") or {}, role) == "a":
+            prompt = f"🧠 <b>{who}</b> — declares his move."
+        else:
+            prompt = f"🧠 <b>{who}</b> — calls his move!"
     elif role == "gk":
         prompt = "🧤 The keeper dives — bot rolls."
     elif isinstance(auto, dict):
@@ -512,6 +515,8 @@ def skill_hint(match_id: int, user_id: int, ab) -> str | None:
     if me is None:
         return None
     tag = "🛡 passive" if ab.kind == "passive" else "⚡ skill"
+    if ab.contest:
+        return f"🧠 <b>{esc(ab.name)}</b> ({tag}) — armed: a hidden read breaks out on the next right move."
     if ab.gamble:
         return f"🎲 <b>{esc(ab.name)}</b> ({tag}) — armed. The die decides the payoff."
     if ab.auto == "stop":
@@ -651,7 +656,8 @@ def bound_page(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
         "• Both on the <b>same team</b> in the match → Bound passives work, "
         "any position in the rotation.\n"
         "• One-sided bound → <b>BUFF</b>: both stay inactive.\n"
-        "• Tier up <b>replaces</b> the Bound with a stronger one — no switching back."
+        "• Tier up strengthens the same partnership — tiers never go down.\n"
+        "• Partner can be changed anytime from this page."
     )
     if tier < MAX_BOUND_TIER:
         nt = tier + 1

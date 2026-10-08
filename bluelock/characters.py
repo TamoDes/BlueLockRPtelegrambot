@@ -11,7 +11,7 @@ def chibi_path(char_key: str) -> Path | None:
     return p if p.is_file() else None
 
 # (name, rarity, (shot, passing, dribble, meta, freekick), title)
-# skills/passives: filled per-character by abilities.py / abilities_extra.py
+# skills/passives: filled per-character by abilities_data.py
 ROSTER = {
     # ── Nigeria ──────────────────────────────────────────────────────────────
     "kuso":       ("Godwin Kuso",       "SR",  (2, 4, 3, 3, 1), "Tempo Controller"),

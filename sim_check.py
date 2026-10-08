@@ -44,7 +44,7 @@ for uid, uname in USERS:
     db.touch_player(uid, uname)
     assert db.set_display(uid, uname.capitalize())
 
-for (uid, _), key in zip(USERS, ["kira", "yuki", "naruhaya", "hyoma_k"]):
+for (uid, _), key in zip(USERS, ["kira", "yukimiya", "naruhaya", "reo"]):
     db.assign_char(uid, key)
 
 assert db.set_display(102, "Alpha") is False
@@ -510,6 +510,7 @@ assert _ab_mod.category_of(_ab_mod.get("chigiri_s1")) == "rush"
 assert _ab_mod.category_of(_ab_mod.get("karasu_s2")) == "penalty"
 assert _ab_mod.category_of(_ab_mod.get("isagi_p2")) == "core", "first_free alone maps to core"
 assert _ab_mod.category_of(_ab_mod.get("kaiser_s1")) == "draw"
+assert _ab_mod.category_of(_ab_mod.get("nagi_p1")) == "read", "contest passives tag as read"
 print("ok  ability catalog synced:", dict(sorted(stats.items())))
 
 fx_match = db.create_match(-555, "clock", 2)
@@ -626,6 +627,15 @@ def do_disarm(mid: int, slot: int) -> None:
     db.update_match(mid, pending=json.dumps(st))
 
 
+def contest_reply(mid: int, pending: dict) -> dict:
+    cfg = pending["duel"].get("contest") or {}
+    opts = engine.contest_opts(cfg, pending["role"])
+    choice = random.choice(opts)[0] if opts else ""
+    if pending["role"] == "contest_set":
+        return engine.submit_contest_set(mid, pending["user_id"], choice)
+    return engine.submit_contest_call(mid, pending["user_id"], choice)
+
+
 def roll_and_resolve(mid: int, att: int | None = None, dfn: int | None = None, gk: int | None = None):
     while True:
         pending = engine.awaiting(db.match(mid))
@@ -635,6 +645,8 @@ def roll_and_resolve(mid: int, att: int | None = None, dfn: int | None = None, g
             engine.record_die(mid, "gk", gk if gk is not None else 3)
         elif pending["role"] in ("spot", "spot_gk"):
             engine.submit_spot(mid, pending["user_id"], "left")
+        elif pending["role"] in ("contest_set", "contest_call"):
+            assert contest_reply(mid, pending)["status"] == "ok"
         else:
             val = att if pending["role"] == "att" else (dfn if dfn is not None else 1)
             assert engine.submit_die(mid, pending["user_id"], val)["status"] == "ok"
@@ -767,14 +779,16 @@ piece = engine.pending_of(db.match(mid3))["set_piece"]
 assert piece == "freekick"
 print("ok  kaiser foul draw armed ->", piece)
 
-# S5: Silent Service passive armed; buff lands and receiver spends it next action
-# (receiver = Rin: his own passive is pass-only, so ONLY the buff shows on the math)
+# S5: Silent Service contest — misread lands the pass clean with a receiver buff
 hiori_u = make_user("hiori")
 mid4 = build_match([(hiori_u, def_u), (rin_u, def_u2)])
 hs = slot_of(mid4, hiori_u)
 rs4 = slot_of(mid4, rin_u)
 arm_stage(mid4, hs, "hiori_p1", zone=0)
 engine.open_duel(mid4, "pass", rs4)
+assert engine.submit_contest_set(mid4, hiori_u, "split")["status"] == "ok"
+r = engine.submit_contest_call(mid4, def_u2, "drop")
+assert r["effect"].get("buff") == 1, r["effect"]
 out = roll_and_resolve(mid4, att=6, dfn=1)
 assert out["outcome"] == "pass_ok"
 buffs = engine.pending_of(db.match(mid4))["buffs"]
@@ -785,7 +799,7 @@ opened = engine.open_duel(mid4, "dribble", None)
 rin_dri = characters.base_stats("rin")["dribble"]
 assert opened["duel"]["att_power"] == rin_dri + 1, "buff rides on receiver's action"
 engine.cancel_duel(mid4)
-print("ok  hiori pass buff grant + consumption")
+print("ok  hiori contest pass: misread lands it +1 to the receiver")
 
 # S6: Devil's Pulse armed — keeper cut down on the compare line
 shidou_u = make_user("shidou", unlocks=["shidou_s2"])
@@ -893,7 +907,7 @@ us = slot_of(midU, isagi_u)
 stage(midU, us, zone=ZONE_SHOOT)
 do_arm(midU, us, "isagi_s3")
 engine.open_duel(midU, "shoot", None)
-out = roll_and_resolve(midU, att=4, dfn=1, gk=6)
+out = roll_and_resolve(midU, att=5, dfn=1, gk=6)
 assert out["outcome"] == "goal" and out.get("margin_goal") == 2
 assert "isagi_s3" in engine.pending_of(db.match(midU))["used"]
 print("ok  isagi ultimate margin goal (armed)")
@@ -917,7 +931,7 @@ engine.cancel_duel(midV)
 stage(midV, kv, zone=ZONE_SHOOT)
 do_arm(midV, kv, "kaiser_s2")
 engine.open_duel(midV, "shoot", None)
-out = roll_and_resolve(midV, att=4, dfn=1, gk=6)
+out = roll_and_resolve(midV, att=5, dfn=1, gk=6)
 assert out.get("margin_goal") == 1, out
 print("ok  arm/disarm lifecycle + Der Übermensch margin")
 
@@ -987,14 +1001,12 @@ mZ = build_match([(z_u, a_u)])
 zs = slot_of(mZ, z_u)
 stage(mZ, zs, zone=1)
 do_arm(mZ, zs, "zantetsu_s1")
-do_arm(mZ, slot_of(mZ, a_u), "aiku_p1")   # manual: defender taps his passive
 opened = engine.open_duel(mZ, "dribble", None)
 assert opened["duel"].get("auto", {}).get("t") == "win", "Steel Dash must win outright"
-assert any(nm == "Board Vision" for nm, _ in opened["duel"]["def_boosts"]), opened["duel"]["def_boosts"]
 out = roll_and_resolve(mZ, att=1, dfn=6)
 assert out["outcome"] == "dribble_ok"
 assert engine.pending_of(db.match(mZ))["zone"] > 1, "a dribble win advances the zone"
-print("ok  newcomers duel: Steel Dash auto-wins + zone, Board Vision defends")
+print("ok  newcomers duel: Steel Dash auto-wins + zone")
 
 # S13: full simulated ranked match WITH abilities stays coherent
 sim_u3 = make_user("bachira")
@@ -1044,6 +1056,8 @@ while not engine.over(db.match(midX)):
             engine.record_die(midX, "gk", random.randint(1, 6))
         elif pending["role"] in ("spot", "spot_gk"):
             engine.submit_spot(midX, pending["user_id"], random.choice(config.PENALTY_TARGETS))
+        elif pending["role"] in ("contest_set", "contest_call"):
+            assert contest_reply(midX, pending)["status"] == "ok"
         else:
             engine.submit_die(midX, pending["user_id"], random.randint(1, 6))
     out = engine.resolve(midX)
@@ -1057,14 +1071,14 @@ assert rep and "MAN OF THE MATCH" in rep
 print(rep.splitlines()[0])
 
 # --- tie_win: a pure tie-win pass skill beats the exact-tie deadlock --------
-tw_u = 104
+tw_u = def_u
 tw_m = rin_u
-midTW = build_match([(tw_u, def_u2), (tw_m, def_u)])
+midTW = build_match([(tw_u, def_u2), (tw_m, 104)])
 stage(midTW, slot_of(midTW, tw_u), zone=1)
-do_arm(midTW, slot_of(midTW, tw_u), "hyoma_k_s2")
+do_arm(midTW, slot_of(midTW, tw_u), "wanima_a_s2")
 opened = engine.open_duel(midTW, "pass", slot_of(midTW, tw_m))
 assert opened["duel"].get("tie_win") is True, "pure tie_win skill must arm at open"
-assert "hyoma_k_s2" in engine.pending_of(db.match(midTW)).get("used", []), "tie_win skill spends at open"
+assert "wanima_a_s2" in engine.pending_of(db.match(midTW)).get("used", []), "tie_win skill spends at open"
 ap, dp = opened["duel"]["att_power"], opened["duel"]["def_power"]
 tie_att = next(d for d in range(1, DICE_FACES + 1) if 1 <= d + ap - dp <= DICE_FACES)
 tie_def = tie_att + ap - dp
@@ -1443,7 +1457,7 @@ opened = engine.open_duel(mG2, "pass", rS2)
 out = roll_and_resolve(mG2, att=6, dfn=1)
 assert out["outcome"] == "pass_ok", out
 st = engine.pending_of(db.match(mG2))
-assert st.get("pending_goal", {}).get("owner") == sS2, st.get("pending_goal")
+assert st.get("pending_goals", [{}])[0].get("owner") == sS2, st.get("pending_goals")
 # the receiver scores one action later (a penalty keeps it deterministic)
 st.update({"zone": ZONE_BOX, "set_piece": "penalty", "beaten": []})
 db.update_match(mG2, pending=json.dumps(st), phase="opening", holder=rS2)
@@ -1453,7 +1467,7 @@ assert engine.submit_spot(mG2, def_u, "right")["status"] == "ok"
 out = engine.resolve(mG2)
 assert out["outcome"] == "goal", out
 st = engine.pending_of(db.match(mG2))
-assert "pending_goal" not in st, "the payout is consumed by the goal"
+assert "pending_goals" not in st, "the payout is consumed by the goal"
 paid = [(s["slot"], s["amt"], s["src"]) for s in st.get("streaks", [])
         if s.get("kind") == "reward" and (s.get("amt") or 0) > 0]
 assert (sS2, 1, "sae_p1") in paid, ("Sae is owed +1", paid)
@@ -1496,7 +1510,7 @@ assert len(st2.get("beaten", [])) >= _nop, (st2.get("beaten"), "of", _nop)
 print("ok  Dance: high die walks past the whole defence",
       len(st2.get("beaten", [])), "/", _nop)
 
-# S22: Hugo's Phantom Pass/Shot — HUGO picks which die is real, then it is guessed.
+# S22: Hugo's Phantom Pass/Shot — now a contest: Hugo hides a die, they call it.
 hugo_u = make_user("hugo")
 mH = build_match([(hugo_u, def_u), (isagi_u, def_u2)])
 sH = slot_of(mH, hugo_u)
@@ -1504,11 +1518,12 @@ stage(mH, sH, zone=1)
 do_arm(mH, sH, "hugo_p1")
 engine.open_duel(mH, "pass", slot_of(mH, isagi_u))
 pH = engine.awaiting(db.match(mH))
-assert pH and pH["role"] == "bluff_set" and pH["user_id"] == hugo_u, pH
-assert engine.submit_bluff_set(mH, hugo_u, 2)["status"] == "ok"   # he calls die 2
+assert pH and pH["role"] == "contest_set" and pH["user_id"] == hugo_u, pH
+assert engine.submit_contest_set(mH, hugo_u, "2")["status"] == "ok"
 pH = engine.awaiting(db.match(mH))
-assert pH and pH["role"] == "bluff", pH
-assert engine.submit_bluff(mH, pH["user_id"], 1)["status"] == "ok"  # defender misses
+assert pH and pH["role"] == "contest_call", pH
+r = engine.submit_contest_call(mH, pH["user_id"], "1")
+assert r["effect"].get("win") == "att", r["effect"]
 assert engine.ready(db.match(mH)), "a wrong call ends the contest"
 out = engine.resolve(mH)
 assert out["outcome"] == "pass_ok", out
@@ -1520,9 +1535,10 @@ stage(mH2, sH2, zone=1)
 do_arm(mH2, sH2, "hugo_p1")
 engine.open_duel(mH2, "pass", slot_of(mH2, isagi_u))
 pH2 = engine.awaiting(db.match(mH2))
-assert engine.submit_bluff_set(mH2, hugo_u, 3)["status"] == "ok"   # he calls die 3
+assert engine.submit_contest_set(mH2, hugo_u, "3")["status"] == "ok"
 pH2 = engine.awaiting(db.match(mH2))
-assert engine.submit_bluff(mH2, pH2["user_id"], 3)["status"] == "ok"  # defender reads him
+r = engine.submit_contest_call(mH2, pH2["user_id"], "3")
+assert r["effect"] == {}, r["effect"]
 assert not engine.ready(db.match(mH2)), "the contest still needs its dice"
 out = roll_and_resolve(mH2, att=1, dfn=6)
 assert out["outcome"] != "pass_ok", out   # a right call really can cost him
@@ -1673,5 +1689,218 @@ out = roll_and_resolve(mL2, att=1, dfn=1, gk=6)   # a die-6 keeper saves this
 assert out["outcome"] == "goal", out
 assert out.get("beat_keeper"), out
 print("ok  Dance: the run ends with him around a die-6 keeper")
+
+# --- BOUND: mutual partners on the same team fire, tier scales the bonus ----
+b_z = new_users["zantetsu"]
+b_n = new_users["ness"]
+db.set_bound(b_z, "ness")
+db.set_bound(b_n, "zantetsu")
+db.set_bound_tier(b_z, 2)
+mBD = build_match([(b_z, def_u), (b_n, def_u2)])
+zs = slot_of(mBD, b_z)
+stage(mBD, zs, zone=0)
+do_arm(mBD, zs, "zantetsu_bp")
+opened = engine.open_duel(mBD, "dribble", None)
+assert "error" not in opened
+hits = [(n, v) for n, v in opened["duel"].get("att_boosts", []) if n == "Blade Dash"]
+assert hits == [("Blade Dash", 2)], hits
+assert "zantetsu_bp" in engine.pending_of(db.match(mBD)).get("used", [])
+print("ok  bound: mutual partners on the same team fire; tier II scales +1 -> +2")
+
+db.set_bound(b_n, None)
+mBD2 = build_match([(b_z, def_u), (b_n, def_u2)])
+zs2 = slot_of(mBD2, b_z)
+stage(mBD2, zs2, zone=0)
+do_arm(mBD2, zs2, "zantetsu_bp")
+opened = engine.open_duel(mBD2, "dribble", None)
+assert "error" not in opened
+hits = [(n, v) for n, v in opened["duel"].get("att_boosts", []) if n == "Blade Dash"]
+assert hits == [], hits
+assert "zantetsu_bp" not in engine.pending_of(db.match(mBD2)).get("used", [])
+print("ok  bound: a one-sided bind stays inactive and keeps the charge")
+
+# --- BOUND leak: an armed *_bp without a partner must never apply at resolve -
+solo = new_users["aiku"]
+mSL = build_match([(isagi_u, solo)])
+ss = slot_of(mSL, isagi_u)
+sls = slot_of(mSL, solo)
+stage(mSL, ss, zone=0)
+do_arm(mSL, sls, "aiku_bp")
+engine.open_duel(mSL, "dribble", None)
+out = roll_and_resolve(mSL, att=4, dfn=1)
+assert not [(n, v) for n, v in out.get("def_boosts", []) if n == "Libero Lock"], out.get("def_boosts")
+pend = engine.pending_of(db.match(mSL))
+assert "aiku_bp" not in pend.get("used", []), "inactive bound passive must keep its charge"
+print("ok  bound: resolve never applies a bound passive without its partner")
+
+# --- penalty ERASE: the keeper's auto-stop skill skips the corner game -------
+gk_u = make_user("fukaku", unlocks=["fukaku_s2"])
+mPE = build_match([(isagi_u, gk_u)])
+ps = slot_of(mPE, isagi_u)
+ks = slot_of(mPE, gk_u)
+stage(mPE, ps, zone=ZONE_BOX, set_piece="penalty")
+do_arm(mPE, ks, "fukaku_s2")
+opened = engine.open_duel(mPE, "penalty", None)
+assert "error" not in opened
+assert engine.awaiting(db.match(mPE)) is None, "an erased penalty asks for no corner"
+out = engine.resolve(mPE)
+assert out["outcome"] == "saved" and out.get("erased"), out
+assert "fukaku_s2" in engine.pending_of(db.match(mPE))["used"]
+dsc = engine.describe(out, {r["slot"]: r for r in db.roster(mPE)})
+assert "erased" in dsc, dsc
+print("ok  penalty erase: the keeper's stop skill cancels the corner game")
+
+# --- no resurrection: a freekick-only skill must not fire on open play -------
+midRN = build_match([(rin_u, def_u)])
+rs = slot_of(midRN, rin_u)
+stage(midRN, rs, zone=ZONE_SHOOT)
+do_arm(midRN, rs, "rin_s2")
+engine.open_duel(midRN, "shoot", None)
+out = roll_and_resolve(midRN, att=5, dfn=1, gk=5)
+pend = engine.pending_of(db.match(midRN))
+assert "rin_s2" not in pend.get("used", []), "Itoshi Curl is freekick-only — the charge survives"
+assert out["outcome"] == "saved", out
+print("ok  gating: freekick-only skill neither fires nor burns on a shot")
+
+# --- gamble with no defender: a low roll collapses instead of crashing -------
+db.grant_unlock(104, "reo_s1")
+mGB = build_match([(104, def_u), (rin_u, def_u2)])
+gs = slot_of(mGB, 104)
+opp = [r["slot"] for r in db.roster(mGB) if r["team"] != 1]
+stage(mGB, gs, zone=ZONE_SHOOT, beaten=opp)
+do_arm(mGB, gs, "reo_s1")
+opened = engine.open_duel(mGB, "shoot", None)
+assert "error" not in opened
+assert opened["duel"].get("gamble") is True, opened["duel"].get("gamble")
+out = roll_and_resolve(mGB, att=1, dfn=1, gk=3)
+assert out.get("gamble_backfire"), out
+assert out["outcome"] != "goal", out
+pend = engine.pending_of(db.match(mGB))
+assert pend.get("beaten") == [gs], (pend.get("beaten"), "turnover clears the field, the loser stays beaten")
+print("ok  gamble backfire with no defender: collapses cleanly, ball turns over")
+
+# --- mid-duel defensive arm: a stop pressed while the rolls are pending -----
+midMS = build_match([(isagi_u, gA)])
+ms = slot_of(midMS, isagi_u)
+mds = slot_of(midMS, gA)
+stage(midMS, ms, zone=0)
+assert "error" not in engine.open_duel(midMS, "dribble", None)
+do_arm(midMS, mds, "barou_s1")
+out = roll_and_resolve(midMS, att=6, dfn=1)
+assert out["outcome"] == "tackled", out
+assert out.get("stopped_by_skill") and out["stopped_by_skill"]["slot"] == mds, out.get("stopped_by_skill")
+assert "barou_s1" in engine.pending_of(db.match(midMS))["used"]
+print("ok  mid-duel arm: a stop pressed during the duel still wins the ball")
+
+# --- wrong call on a SHOT wins outright — the keeper never gets a say -------
+mH3 = build_match([(hugo_u, def_u), (isagi_u, def_u2)])
+sH3 = slot_of(mH3, hugo_u)
+stage(mH3, sH3, zone=ZONE_SHOOT)
+do_arm(mH3, sH3, "hugo_p1")
+engine.open_duel(mH3, "shoot", None)
+pH3 = engine.awaiting(db.match(mH3))
+assert pH3 and pH3["role"] == "contest_set" and pH3["user_id"] == hugo_u, pH3
+engine.submit_contest_set(mH3, hugo_u, "2")
+pH3 = engine.awaiting(db.match(mH3))
+assert pH3 and pH3["role"] == "contest_call", pH3
+engine.submit_contest_call(mH3, pH3["user_id"], "1")
+out = roll_and_resolve(mH3, att=1, gk=6)
+assert out["outcome"] == "goal", out
+assert out.get("sure_goal"), out
+print("ok  Phantom Call: a wrong call on the shot wins outright")
+
+# --- contest: interactive mind-game passives (12-char pilot wave) -----------
+# attacker hides, defender misreads -> auto win + zone + spend
+mC1 = build_match([(nagi_u, def_u2)])
+cs1 = slot_of(mC1, nagi_u)
+stage(mC1, cs1, zone=0)
+do_arm(mC1, cs1, "nagi_p1")
+assert "error" not in engine.open_duel(mC1, "dribble", None)
+p = engine.awaiting(db.match(mC1))
+assert p and p["role"] == "contest_set" and p["user_id"] == nagi_u, p
+board = views.duel_board(db.match(mC1), db.roster(mC1))
+assert "locks in a hidden move" in board and "send 🎲" not in board, board
+assert engine.submit_contest_set(mC1, nagi_u, "spring")["status"] == "ok"
+p = engine.awaiting(db.match(mC1))
+assert p and p["role"] == "contest_call" and p["user_id"] == def_u2, p
+board = views.duel_board(db.match(mC1), db.roster(mC1))
+assert "calls his move" in board and "send 🎲" not in board, board
+assert engine.submit_contest_call(mC1, def_u2, "nonsense")["status"] == "invalid"
+r = engine.submit_contest_call(mC1, def_u2, "back")
+assert r["effect"].get("win") == "att" and r["effect"].get("zone") == 1, r
+pend = engine.pending_of(db.match(mC1))
+assert pend["duel"]["auto"]["t"] == "win" and pend["duel"]["zone_extra"] == 1
+assert "nagi_p1" in pend["used"]
+out = roll_and_resolve(mC1, att=1)
+assert out["outcome"] == "dribble_ok", out
+assert engine.pending_of(db.match(mC1))["zone"] > 0, "the baited zone lands"
+print("ok  contest: attacker hides, misread -> auto win + zone, charge spent")
+
+# a correct read kills the same move
+mC2 = build_match([(nagi_u, def_u2)])
+cs2 = slot_of(mC2, nagi_u)
+stage(mC2, cs2, zone=0)
+do_arm(mC2, cs2, "nagi_p1")
+engine.open_duel(mC2, "dribble", None)
+assert engine.submit_contest_set(mC2, nagi_u, "spring")["status"] == "ok"
+r = engine.submit_contest_call(mC2, def_u2, "press")
+assert r["effect"].get("win") == "def", r
+out = roll_and_resolve(mC2, att=6, dfn=1)
+assert out["outcome"] in ("tackled", "blocked"), out
+print("ok  contest: a correct read smothers the burst")
+
+# defender-secret: the defence hides its call, the attacker declares
+noa_u = make_user("noa")
+mC3 = build_match([(noa_u, def_u)])
+cs3 = slot_of(mC3, noa_u)
+ds3 = slot_of(mC3, def_u)
+stage(mC3, cs3, zone=1)
+do_arm(mC3, cs3, "noa_p1")
+engine.open_duel(mC3, "dribble", None)
+cfg = engine.pending_of(db.match(mC3))["duel"]["contest"]
+assert cfg["secret"] == "d" and cfg["set_slot"] == ds3 and cfg["call_slot"] == cs3, cfg
+p = engine.awaiting(db.match(mC3))
+assert p and p["role"] == "contest_set" and p["user_id"] == def_u, p
+assert engine.submit_contest_set(mC3, def_u, "sense")["status"] == "ok"
+p = engine.awaiting(db.match(mC3))
+assert p and p["role"] == "contest_call" and p["user_id"] == noa_u, p
+r = engine.submit_contest_call(mC3, noa_u, "direct")
+assert r["effect"].get("win") == "def", r
+out = roll_and_resolve(mC3, att=6, dfn=1)
+assert out["outcome"] in ("tackled", "blocked"), out
+print("ok  contest: defender-secret flow — he hides, Noa declares")
+
+# defender-owned read (aiku) kills the attacker's declared drive
+mC4 = build_match([(isagi_u, new_users["aiku"])])
+sC4 = slot_of(mC4, isagi_u)
+aC4 = slot_of(mC4, new_users["aiku"])
+stage(mC4, sC4, zone=0)
+do_arm(mC4, aC4, "aiku_p1")
+engine.open_duel(mC4, "dribble", None)
+cfg = engine.pending_of(db.match(mC4))["duel"]["contest"]
+assert cfg["owner"] == "d" and cfg["d_slot"] == aC4 and cfg["set_slot"] == sC4, cfg
+assert engine.submit_contest_set(mC4, isagi_u, "drive")["status"] == "ok"
+r = engine.submit_contest_call(mC4, new_users["aiku"], "ice_drive")
+assert r["effect"].get("win") == "def", r
+out = roll_and_resolve(mC4, att=6, dfn=1)
+assert out["outcome"] in ("tackled", "blocked"), out
+print("ok  contest: defender-owned read (Board Vision) kills the drive")
+
+# unmarked: no moment, no spend
+mC5 = build_match([(nagi_u, def_u2)])
+sC5 = slot_of(mC5, nagi_u)
+oppC5 = [r["slot"] for r in db.roster(mC5) if r["team"] != 1]
+stage(mC5, sC5, zone=1, beaten=oppC5)
+do_arm(mC5, sC5, "nagi_p1")
+engine.open_duel(mC5, "dribble", None)
+pend = engine.pending_of(db.match(mC5))
+assert "contest" not in pend["duel"]
+assert engine.awaiting(db.match(mC5)) is None
+out = roll_and_resolve(mC5, att=4)
+assert out["outcome"] == "dribble_ok", out
+pend = engine.pending_of(db.match(mC5))
+assert "nagi_p1" not in pend["used"], "unmarked action must keep the charge"
+print("ok  contest: unmarked action starts no mind-game, charge kept")
+
 print("\nABILITY SUITE PASSED")
 print("\nALL SIMULATION CHECKS PASSED")

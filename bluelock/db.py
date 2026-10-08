@@ -923,29 +923,6 @@ def is_bound_pair(user1_id: int, user2_id: int, roster: list) -> bool:
     return r1["team"] == r2["team"]
 
 
-def is_buff_pair(user1_id: int, user2_id: int) -> bool:
-    """
-    True if user1 is bound TO user2 but user2 is NOT bound back (one-way).
-    This means BUFF: neither passive activates.
-    """
-    p1 = q1("SELECT bound_with FROM owned WHERE user_id=?", (user1_id,))
-    p2_own = q1("SELECT char_key FROM owned WHERE user_id=?", (user2_id,))
-    if not p1 or not p2_own:
-        return False
-    # One-way = user2 does NOT have user1 as their bound
-    p2 = q1("SELECT bound_with FROM owned WHERE user_id=?", (user2_id,))
-    if not p2:
-        return False
-    p1_bound_to = p1["bound_with"]
-    p2_bound_char = p2_own["char_key"]
-    p2_bound_to = p2["bound_with"]
-    # BUFF if p1 is bound to p2's char but p2 is NOT bound to p1's char
-    p1_own_char = q1("SELECT char_key FROM owned WHERE user_id=?", (user1_id,))
-    if not p1_own_char:
-        return False
-    return p1_bound_to == p2_bound_char and p2_bound_to != p1_own_char["char_key"]
-
-
 # ── stat allocation ─────────────────────────────────────────────────────
 
 def allocate_stat(user_id: int, stat: str, amount: int = 1) -> None:

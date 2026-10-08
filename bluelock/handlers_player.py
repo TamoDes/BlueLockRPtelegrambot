@@ -517,7 +517,7 @@ def bind_cb(call):
             safe(bot.answer_callback_query, call.id, "Pick another player's character.", show_alert=True)
             return
         db.set_bound(uid, target_own["char_key"])
-        safe(bot.answer_callback_query, call.id, f"🔗 Bound to {name_of(target_own['char_key'])} — no switching later, only tier upgrades.")
+        safe(bot.answer_callback_query, call.id, f"🔗 Bound to {name_of(target_own['char_key'])} — same team in a match turns it on.")
         _refresh_bound(call)
         return
 

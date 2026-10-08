@@ -274,22 +274,13 @@ def spot_keyboard(match_id: int, role: str) -> types.InlineKeyboardMarkup:
     return kb
 
 
-def bluff_keyboard(match_id: int) -> types.InlineKeyboardMarkup:
-    kb = types.InlineKeyboardMarkup(row_width=3)
-    kb.add(*[
-        types.InlineKeyboardButton(f"🎲 Die {n}", callback_data=f"bluff|{match_id}|{n}")
-        for n in (1, 2, 3)
-    ])
-    return kb
-
-
-def bluff_set_keyboard(match_id: int) -> types.InlineKeyboardMarkup:
-    """Hugo's own pick — the answer is never printed anywhere."""
-    kb = types.InlineKeyboardMarkup(row_width=3)
-    kb.add(*[
-        types.InlineKeyboardButton(f"🎲 Die {n}", callback_data=f"bluffset|{match_id}|{n}")
-        for n in (1, 2, 3)
-    ])
+def contest_keyboard(match_id: int, which: str, opts: list) -> types.InlineKeyboardMarkup:
+    short = which.split("_", 1)[1]
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    for key, label in opts:
+        kb.add(types.InlineKeyboardButton(
+            label, callback_data=f"contest|{match_id}|{short}|{key}"
+        ))
     return kb
 
 
@@ -318,26 +309,19 @@ def prompt_dice(match_id: int) -> None:
             )
         return
 
-    if role == "bluff_set":
+    if role in ("contest_set", "contest_call"):
+        cfg = duel.get("contest") or {}
+        side = engine.contest_side(cfg, role)
+        if role == "contest_set":
+            head = f"🃏 <b>{who}</b> — make your move (only you'll know it)."
+        elif side == "a":
+            head = f"🧠 <b>{who}</b> — declare your move."
+        else:
+            head = f"🧠 <b>{who}</b> — call his move!"
+        opts = engine.contest_opts(cfg, role)
         for chat_id in broadcast_targets(match):
-            safe(
-                bot.send_message,
-                chat_id,
-                f"🃏 <b>{who}</b> — you threw three dice. Call one of them real "
-                f"(the answer stays with you).",
-                reply_markup=bluff_set_keyboard(match_id),
-            )
-        return
-
-    if role == "bluff":
-        for chat_id in broadcast_targets(match):
-            safe(
-                bot.send_message,
-                chat_id,
-                f"🃏 Three dice, one of them called real. "
-                f"<b>{who}</b> — which die is it?",
-                reply_markup=bluff_keyboard(match_id),
-            )
+            safe(bot.send_message, chat_id, head,
+                 reply_markup=contest_keyboard(match_id, role, opts))
         return
 
     if role == "att":
@@ -404,7 +388,6 @@ def advance(match_id: int) -> None:
                     return
                 render_match(match_id)
                 continue
-            stamp_pending_turn(match, engine.pending_of(match))
             render_match(match_id)
             prompt_dice(match_id)
             return
@@ -431,17 +414,8 @@ def advance(match_id: int) -> None:
         if engine.over(match):
             finish(match_id)
         else:
-            stamp_pending_turn(match, engine.pending_of(match))
             render_match(match_id)
         return
-
-
-def stamp_pending_turn(match, state: dict) -> None:
-    stamp = state.get("stamp") or {}
-    if stamp.get("turn") == match["turn"] and stamp.get("at"):
-        return
-    state["stamp"] = {"turn": match["turn"], "at": db.now()}
-    db.update_match(match["id"], pending=json.dumps(state))
 
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("advance|"))
@@ -492,34 +466,8 @@ def advance_cb(call):
     if engine.over(match):
         finish(match_id)
     else:
-        stamp_pending_turn(match, engine.pending_of(match))
         render_match(match_id)
     safe(bot.answer_callback_query, call.id)
-
-
-@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("bluffset|"))
-def bluff_set_cb(call):
-    seen(call)
-    parts = call.data.split("|")
-    if len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) not in (1, 2, 3):
-        safe(bot.answer_callback_query, call.id)
-        return
-    match_id = int(parts[1])
-    result = engine.submit_bluff_set(match_id, call.from_user.id, int(parts[2]))
-    if result["status"] == "wrong":
-        safe(bot.answer_callback_query, call.id, f"That's {result['name']}'s call.", show_alert=True)
-        return
-    if result["status"] != "ok":
-        safe(bot.answer_callback_query, call.id)
-        return
-    # never echo which die — the whole point is that only he knows
-    safe(bot.answer_callback_query, call.id, "✅ Called")
-    broadcast(
-        db.match(match_id),
-        f"🃏 <b>{esc(result['name'])}</b> locked in a die",
-        skip=call.message.chat.id if call.message else None,
-    )
-    advance(match_id)
 
 
 @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("kmode|"))
@@ -551,27 +499,53 @@ def kmode_cb(call):
     safe(bot.answer_callback_query, call.id, toasts.get(res["status"], "Not right now."), show_alert=True)
 
 
-@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("bluff|"))
-def bluff_cb(call):
+@bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("contest|"))
+def contest_cb(call):
     seen(call)
     parts = call.data.split("|")
-    if len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) not in (1, 2, 3):
+    if len(parts) != 4 or parts[2] not in ("set", "call") or not parts[1].isdigit():
         safe(bot.answer_callback_query, call.id)
         return
-    match_id = int(parts[1])
-    pick = int(parts[2])
-    result = engine.submit_bluff(match_id, call.from_user.id, pick)
+    match_id, which, choice = int(parts[1]), parts[2], parts[3]
+    if which == "set":
+        result = engine.submit_contest_set(match_id, call.from_user.id, choice)
+        if result["status"] == "wrong":
+            safe(bot.answer_callback_query, call.id, f"That's {result['name']}'s read.", show_alert=True)
+            return
+        if result["status"] != "ok":
+            safe(bot.answer_callback_query, call.id)
+            return
+        safe(bot.answer_callback_query, call.id, "✅ Locked in")
+        broadcast(
+            db.match(match_id),
+            f"🔒 <b>{esc(result['name'])}</b> locked in a move",
+            skip=call.message.chat.id if call.message else None,
+        )
+        advance(match_id)
+        return
+    result = engine.submit_contest_call(match_id, call.from_user.id, choice)
     if result["status"] == "wrong":
         safe(bot.answer_callback_query, call.id, f"That's {result['name']}'s call.", show_alert=True)
         return
     if result["status"] != "ok":
         safe(bot.answer_callback_query, call.id)
         return
-    safe(bot.answer_callback_query, call.id, f"🎲 Die {pick}")
+    pretty = choice.replace("_", " ").title()
+    safe(bot.answer_callback_query, call.id, f"🧠 {pretty}")
+    eff = result.get("effect") or {}
+    if eff.get("win") == "att":
+        verdict = " — the move is beaten!"
+    elif eff.get("win") == "def":
+        verdict = " — READ! The move dies here."
+    elif eff.get("att"):
+        verdict = f" — +{eff['att']} on the move"
+    elif eff.get("def"):
+        verdict = f" — the read holds: +{eff['def']} defending"
+    else:
+        verdict = ""
     broadcast(
         db.match(match_id),
-        f"🃏 <b>{esc(result['name'])}</b> called die {pick}",
-        skip=call.message.chat.id if call.message else None,
+        f"🧠 <b>{esc(result['name'])}</b> calls it: <code>{esc(pretty)}</code>{verdict}",
     )
     advance(match_id)
 

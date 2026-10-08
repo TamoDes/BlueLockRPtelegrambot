@@ -12,12 +12,20 @@ from .config import (
     KEEPER_CATCH_ROLL,
     KEEPER_NAME,
     KEEPER_POWER,
-    PENALTY_NERVE_SPAN,
     PENALTY_TARGETS,
     STAT_NAME,
     ZONE_BOX,
     ZONE_SHOOT,
     max_turns,
+)
+from .render import (
+    COMMENTARY,
+    big_moment_lines,
+    commentary,
+    describe,
+    duel_line,
+    gk_line,
+    wall_line,
 )
 
 ACTION_STAT = {
@@ -94,19 +102,6 @@ def zone_of(match) -> int:
     return pending_of(match).get("zone", 0)
 
 
-def stamp_turn(match, state: dict) -> None:
-    """Record when the current waiting state began — feeds the auto-roll timer."""
-    state["stamp"] = {"turn": match["turn"], "at": db.now()}
-
-
-def stale_since(state: dict, match) -> int | None:
-    """Seconds the match has waited on the same turn — None if unknown/mismatched."""
-    stamp = state.get("stamp") or {}
-    if not stamp or stamp.get("turn") != match["turn"]:
-        return None
-    return max(0, db.now() - int(stamp.get("at", 0)))
-
-
 def fresh_state() -> dict:
     return {
         "zone": 0,
@@ -119,7 +114,6 @@ def fresh_state() -> dict:
         "lines": {},
         "last_holder": None,
         "charges": {},
-        "stamp": {},
     }
 
 
@@ -192,7 +186,6 @@ def start(match_id: int) -> bool:
         side = "BLUE" if opener["team"] == 1 else "RED"
         tag = "kickoff:blue" if opener["team"] == 1 else "kickoff:red"
         db.log_event(match_id, f"🟢 [{tag}] Kickoff — <b>{opener['name']}</b> starts from the back for {side}.")
-        db.update_match(match_id, pending=json.dumps({**state, "stamp": {"turn": 1, "at": db.now()}}))
     return True
 
 
@@ -328,6 +321,26 @@ def _gated(ab, ctx) -> bool:
         return False
 
 
+def _contest_actions(cfg: dict, action: str) -> bool:
+    acts = cfg.get("action")
+    if isinstance(acts, str):
+        return action == acts
+    return action in (acts or ())
+
+
+def _start_contest(duel: dict, ab, cfg: dict, a_slot: int, d_slot: int, owner: str) -> None:
+    secret = cfg.get("secret", "a")
+    duel["contest"] = {
+        "aid": ab.id, "src": ab.name, "owner": owner,
+        "a_slot": a_slot, "d_slot": d_slot,
+        "set_slot": a_slot if secret == "a" else d_slot,
+        "call_slot": d_slot if secret == "a" else a_slot,
+        "secret": secret,
+        "a": cfg.get("a", []), "d": cfg.get("d", []),
+        "matrix": cfg.get("matrix", {}),
+    }
+
+
 def grant_streak(state: dict, receiver_slot: int, amount: int, src_id: str,
                  kind: str = "streak", scope: str | None = None) -> None:
     """Taha's duration rules for persistent buffs.
@@ -428,7 +441,6 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
         "def_floor": 0,
         "zone_extra": 0,
         "auto": None,
-        "pen_edge_passive": 0,
         "att_die": None,
         "def_die": None,
         "gk_die": None,
@@ -445,8 +457,9 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
         """Remember this passive's goal payout — score_goal() pays it at the
         next goal by the owner's team, then forgets it."""
         if ab.goal_self or ab.goal_mate:
-            state["pending_goal"] = {"owner": actor["slot"], "src": ab.id,
-                                     "self_amt": ab.goal_self, "mate_amt": ab.goal_mate}
+            state.setdefault("pending_goals", []).append(
+                {"owner": actor["slot"], "src": ab.id,
+                 "self_amt": ab.goal_self, "mate_amt": ab.goal_mate})
 
     if armed is not None and _gated(armed, ctx_att):
         if armed.auto == "win":
@@ -457,18 +470,12 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
             if armed.puppet and action == "pass" and duel.get("target") is not None:
                 duel["puppet"] = {"rin": actor["slot"], "mate": duel["target"], "aid": armed.id}
             abilities.note(state, actor["name"], armed, icon=abilities.icon_for(armed))
-        elif armed.bluff:
+        elif (armed.contest is not None and defender is not None
+              and not duel.get("contest")
+              and _contest_actions(armed.contest, action)):
             abilities.spend_armed(state, actor["slot"])
             _stash_goal(armed)
-            if duel.get("defender") is not None:
-                # three dice — HUGO decides which one is real; the defender
-                # only sees the question, never the answer.
-                duel["bluff"] = {"real": None,
-                                 "setter": actor["slot"],
-                                 "picker": duel["defender"],
-                                 "src": armed.name, "aid": armed.id}
-            else:
-                duel["auto"] = {"t": "win", "slot": actor["slot"], "aid": armed.id}
+            _start_contest(duel, armed, armed.contest, actor["slot"], defender["slot"], "a")
             abilities.note(state, actor["name"], armed, icon=abilities.icon_for(armed))
         elif armed.gamble:
             abilities.spend_armed(state, actor["slot"])
@@ -485,7 +492,6 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
                     val = armed.att(ctx_att) or 0
                 except Exception:
                     val = 0
-                val = bound_bonus(armed, ctx_att, val)
             if val or armed.save_self or armed.die_floor or armed.tie_win:
                 abilities.spend_armed(state, actor["slot"])
                 _stash_goal(armed)
@@ -617,6 +623,12 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
         d_armed = abilities.peek_armed(state, row["slot"])
         if d_armed is None or not _gated(d_armed, ctx_def):
             return
+        if (d_armed.contest is not None and not duel.get("contest")
+                and _contest_actions(d_armed.contest, action)):
+            abilities.spend_armed(state, row["slot"])
+            _start_contest(duel, d_armed, d_armed.contest, actor["slot"], row["slot"], "d")
+            abilities.note(state, row["name"], d_armed, icon=abilities.icon_for(d_armed))
+            return
         if d_armed.auto == "stop":
             abilities.spend_armed(state, row["slot"])
             duel["auto"] = {"t": "stop", "slot": row["slot"], "aid": d_armed.id}
@@ -645,6 +657,8 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
     if defender is not None:
         _defender_arms(defender, "def_power", "def_boosts", "def_floor")
     for w in wall[1:]:
+        if isinstance(duel.get("auto"), dict) and duel["auto"].get("t") == "stop":
+            break
         _defender_arms(by_slot[w], "def_power", "def_boosts", "def_floor")
         if isinstance(duel.get("auto"), dict) and duel["auto"].get("t") == "stop":
             duel["defender"] = by_slot[w]["slot"]
@@ -660,13 +674,19 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
         duel["gk_power"] += aura
 
     if action == "penalty":
-        duel["pen_edge_passive"] = sum(
-            ab.pen_edge for ab in att_kit if ab.kind == "passive" and ab.pen_edge
-        )
         keeper_captain = team_captain(roster, defender_team(actor))
         duel["spotter"] = keeper_captain["slot"] if keeper_captain else None
         duel["att_spot"] = None
         duel["gk_spot"] = None
+        if keeper_captain is not None:
+            k_ab = abilities.peek_armed(state, keeper_captain["slot"])
+            if k_ab is not None and k_ab.auto == "stop" and _gated(
+                k_ab, abilities.build_ctx(match, roster, keeper_captain, actor, action, zone, state)
+            ):
+                abilities.spend_armed(state, keeper_captain["slot"])
+                duel["auto"] = {"t": "stop", "slot": keeper_captain["slot"], "aid": k_ab.id}
+                abilities.note(state, keeper_captain["name"], k_ab,
+                               "penalty erased — no guess needed", icon="🧤")
 
     state["duel"] = duel
     notes_out = state.pop("notes", [])
@@ -692,12 +712,18 @@ def open_duel(match_id: int, action: str, target_slot: int | None) -> dict:
 def cancel_duel(match_id: int) -> None:
     match = db.match(match_id)
     state = pending_of(match)
+    duel_actor = (state.get("duel") or {}).get("actor")
     state.pop("duel", None)
     state.pop("notes", None)
     # an abandoned duel must not leave its payout behind for the next action
     state.pop("pending_buff", None)
     state.pop("pending_beats", None)
-    state.pop("pending_goal", None)
+    if state.get("pending_goals"):
+        state["pending_goals"] = [
+            pg for pg in state["pending_goals"] if pg.get("owner") != duel_actor
+        ]
+        if not state["pending_goals"]:
+            state.pop("pending_goals", None)
     _drop_auto_armed(state)
     db.update_match(match_id, phase="play", pending=json.dumps(state))
 
@@ -733,6 +759,14 @@ def past_defender(duel: dict, defender_slot: int | None = None) -> bool | None:
 
 
 def _roles(duel: dict) -> list[tuple[str, str, int | None]]:
+    _c = duel.get("contest")
+    if _c and (duel.get("contest_secret") is None or duel.get("contest_open") is None):
+        roles = []
+        if duel.get("contest_secret") is None:
+            roles.append(("contest_set", "contest_secret", _c["set_slot"]))
+        if duel.get("contest_open") is None:
+            roles.append(("contest_call", "contest_open", _c["call_slot"]))
+        return roles
     auto = duel.get("auto")
     if isinstance(auto, dict) and auto.get("t") == "stop":
         return []
@@ -749,14 +783,6 @@ def _roles(duel: dict) -> list[tuple[str, str, int | None]]:
     if duel.get("no_dice"):
         return []
     roles = []
-    _bl = duel.get("bluff")
-    if _bl:
-        # Hugo calls which die is real (kept off every broadcast), then the
-        # defender has to name it. _next_role fills them in this order.
-        if _bl.get("setter") is not None:
-            roles.append(("bluff_set", "bluff_real", _bl["setter"]))
-        if _bl.get("picker") is not None:
-            roles.append(("bluff", "bluff_pick", _bl["picker"]))
     roles.append(("att", "att_die", duel["actor"]))
     wall = duel.get("wall") or []
     if duel["action"] == "shoot" and not duel.get("gamble"):
@@ -819,10 +845,10 @@ def awaiting(match) -> dict | None:
     out = {"role": role, "slot": slot, "name": row["name"], "user_id": row["user_id"], "duel": duel}
     if role in ("spot", "spot_gk"):
         out["label"] = "Pick your corner" if role == "spot" else "Call the keeper's dive"
-    if role == "bluff_set":
-        out["label"] = "Pick the die you'll call real"
-    if role == "bluff":
-        out["label"] = "Which die did he call real?"
+    if role == "contest_set":
+        out["label"] = "Make your move — it stays hidden"
+    if role == "contest_call":
+        out["label"] = "What's his move?"
     return out
 
 
@@ -876,21 +902,73 @@ def submit_spot(match_id: int, user_id: int, target: str) -> dict:
     return _claim(match_id, user_id, target, ("spot", "spot_gk"))
 
 
-def submit_bluff_set(match_id: int, user_id: int, pick: int) -> dict:
-    """Hugo picks which of his three dice is the real one. It is never echoed
-    back into the chat — only the defender's guess is shown."""
-    if pick not in (1, 2, 3):
-        return {"status": "invalid"}
-    return _claim(match_id, user_id, pick, ("bluff_set",))
+def contest_side(cfg: dict, role: str) -> str:
+    secret = cfg.get("secret", "a")
+    return secret if role == "contest_set" else ("d" if secret == "a" else "a")
 
 
-def submit_bluff(match_id: int, user_id: int, pick: int) -> dict:
-    """Hugo's Phantom Call: the defender names which of the three dice is real.
-    Call it right and the duel runs normally; call it wrong and there is no
-    contest — his pass/shot lands ("گارانتی رد یا گل")."""
-    if pick not in (1, 2, 3):
+def contest_opts(cfg: dict, role: str) -> list:
+    return cfg.get(contest_side(cfg, role)) or []
+
+
+def _contest_choice_ok(role: str, choice: str, duel: dict) -> bool:
+    cfg = (duel or {}).get("contest") or {}
+    return any(choice == k for k, _ in contest_opts(cfg, role))
+
+
+def submit_contest_set(match_id: int, user_id: int, choice: str) -> dict:
+    match = db.match(match_id)
+    if not match or match["phase"] != "duel":
+        return {"status": "closed"}
+    duel = pending_of(match).get("duel")
+    if not _contest_choice_ok("contest_set", choice, duel):
         return {"status": "invalid"}
-    out = _claim(match_id, user_id, pick, ("bluff",))
+    return _claim(match_id, user_id, choice, ("contest_set",))
+
+
+def _apply_contest_effect(c, match_id: int, state: dict, duel: dict, cfg: dict, eff: dict) -> None:
+    winner = eff.get("win")
+    if winner == "att":
+        duel["auto"] = {"t": "win", "slot": cfg.get("a_slot"),
+                        "aid": cfg.get("aid"), "contest": True}
+    elif winner == "def":
+        duel["auto"] = {"t": "stop", "slot": cfg.get("d_slot"),
+                        "aid": cfg.get("aid"), "contest": True}
+    if eff.get("sure"):
+        duel["sure_goal"] = True
+    if eff.get("zone"):
+        duel["zone_extra"] = duel.get("zone_extra", 0) + int(eff["zone"])
+    if eff.get("att"):
+        duel["att_power"] = duel.get("att_power", 0) + int(eff["att"])
+        duel.setdefault("att_boosts", []).append((cfg.get("src", "contest"), int(eff["att"])))
+    if eff.get("def"):
+        duel["def_power"] = duel.get("def_power", 0) + int(eff["def"])
+        duel.setdefault("def_boosts", []).append((cfg.get("src", "contest"), int(eff["def"])))
+    if eff.get("buff") and duel.get("target") is not None:
+        from_name = ""
+        prow = c.execute(
+            "SELECT name FROM match_players WHERE match_id=? AND slot=?",
+            (match_id, cfg.get("a_slot")),
+        ).fetchone()
+        if prow:
+            from_name = prow["name"]
+        state.setdefault("buffs", []).append({
+            "slot": duel["target"], "amt": int(eff["buff"]),
+            "src": cfg.get("aid"), "from": from_name,
+        })
+        state.setdefault("notes", []).append(
+            f"✨ <b>{cfg.get('src')}</b> — receiver +{int(eff['buff'])}"
+        )
+
+
+def submit_contest_call(match_id: int, user_id: int, choice: str) -> dict:
+    match = db.match(match_id)
+    if not match or match["phase"] != "duel":
+        return {"status": "closed"}
+    duel = pending_of(match).get("duel")
+    if not _contest_choice_ok("contest_call", choice, duel):
+        return {"status": "invalid"}
+    out = _claim(match_id, user_id, choice, ("contest_call",))
     if out.get("status") != "ok":
         return out
     with db.tx() as c:
@@ -899,12 +977,20 @@ def submit_bluff(match_id: int, user_id: int, pick: int) -> dict:
             return out
         state = json.loads(row["pending"] or "{}")
         duel = state.get("duel") or {}
-        bl = duel.get("bluff") or {}
-        if bl and duel.get("bluff_pick") is not None and duel["bluff_pick"] != duel.get("bluff_real"):
-            duel["auto"] = {"t": "win", "slot": duel.get("actor"),
-                            "aid": bl.get("aid"), "src": bl.get("src"),
-                            "bluff_miss": True}
-            c.execute("UPDATE matches SET pending=? WHERE id=?", (json.dumps(state), match_id))
+        cfg = duel.get("contest") or {}
+        set_side = contest_side(cfg, "contest_set")
+        a_pick = duel.get("contest_secret") if set_side == "a" else duel.get("contest_open")
+        d_pick = duel.get("contest_open") if set_side == "a" else duel.get("contest_secret")
+        eff = (cfg.get("matrix") or {}).get(f"{a_pick}_{d_pick}") or {}
+        _apply_contest_effect(c, match_id, state, duel, cfg, eff)
+        state.setdefault("notes", []).append(
+            f"🧠 <b>{cfg.get('src')}</b> — the read lands: "
+            f"<code>{a_pick}</code> vs <code>{d_pick}</code>"
+        )
+        c.execute("UPDATE matches SET pending=? WHERE id=?", (json.dumps(state), match_id))
+    out["a_pick"] = a_pick
+    out["d_pick"] = d_pick
+    out["effect"] = eff
     return out
 
 
@@ -995,7 +1081,8 @@ def arm_skill(match_id: int, user_id: int, ability_id: str,
 
 
 def is_defensive(ab) -> bool:
-    return ab.auto == "stop" or ab.punch_to_self or ab.dfd is not None or ab.first_free
+    return (ab.auto == "stop" or ab.punch_to_self or ab.dfd is not None
+            or ab.first_free or ab.contest is not None)
 
 
 def _snapshot(duel: dict, actor, defender, zone: int) -> dict:
@@ -1045,6 +1132,9 @@ def resolve(match_id: int) -> dict | None:
     defender = by_slot.get(duel["defender"]) if duel["defender"] is not None else None
     action = duel["action"]
     was_set_piece = action in SET_PIECES
+
+    def _uctx(self_row, other_row):
+        return abilities.build_ctx(match, roster, self_row, other_row, action, zone, state)
     # Stashed by open_duel() when the passive burns its charge there (attack
     # bonus + receiver buff in one ability, e.g. Sae / Charles). Popped right
     # away so an incomplete pass drops it instead of leaking to a later action.
@@ -1056,9 +1146,20 @@ def resolve(match_id: int) -> dict | None:
         if row is None:
             continue
         d_armed = abilities.peek_armed(state, slot)
-        if d_armed is None or d_armed.dfd is None or d_armed.gamble:
+        if d_armed is None or d_armed.gamble:
             continue
-        ctx_def = abilities.build_ctx(match, roster, row, actor, action, zone, state)
+        ctx_def = _uctx(row, actor)
+        if not _gated(d_armed, ctx_def):
+            continue
+        if d_armed.auto == "stop":
+            abilities.spend_armed(state, slot)
+            duel["auto"] = {"t": "stop", "slot": slot, "aid": d_armed.id}
+            duel["defender"] = slot
+            defender = row
+            abilities.note(state, row["name"], d_armed, icon=abilities.icon_for(d_armed))
+            break
+        if d_armed.dfd is None:
+            continue
         try:
             val = d_armed.dfd(ctx_def) or 0
         except Exception:
@@ -1068,6 +1169,9 @@ def resolve(match_id: int) -> dict | None:
             duel["def_power"] += val
             duel["def_boosts"].append((d_armed.name, val))
             abilities.note(state, row["name"], d_armed, icon=abilities.icon_for(d_armed))
+            if d_armed.hold_bonus and (ctx_def.get("mode") or "defense") == "defense":
+                state["pending_hold"] = {"slot": slot, "amt": d_armed.hold_bonus,
+                                         "name": d_armed.name, "src": d_armed.id}
 
     out = _snapshot(duel, actor, defender, zone)
     if action in ("pass", "cross"):
@@ -1084,12 +1188,13 @@ def resolve(match_id: int) -> dict | None:
     auto = duel.get("auto")
     gamble_win = False
     gamble_n = 0
-    if duel.get("gamble") and defender is not None and auto is None:
+    if duel.get("gamble") and auto is None:
         die = duel.get("att_die") or 1
         gamble_min = duel.get("gamble_min", 0)
         if gamble_min and die < gamble_min:
             out["gamble_backfire"] = True
-            duel["auto"] = {"t": "stop", "slot": defender["slot"], "aid": duel.get("gamble_aid")}
+            if defender is not None:
+                duel["auto"] = {"t": "stop", "slot": defender["slot"], "aid": duel.get("gamble_aid")}
             ab = abilities.get(duel.get("gamble_aid"))
             if ab:
                 abilities.note(state, actor["name"], ab, "backfired — the gamble collapses", icon="💀")
@@ -1192,9 +1297,8 @@ def resolve(match_id: int) -> dict | None:
         ]
         # Passive goal payout (Taha's "اگ گل شد ... میگیره"): owed to the owner
         # once his team scores. Granted AFTER the sweep so it survives this goal
-        # and the next one wipes it. The pending is dropped either way.
-        pg = state.pop("pending_goal", None)
-        if pg:
+        # and the next one wipes it. The pendings are dropped either way.
+        for pg in state.pop("pending_goals", []):
             _owner = by_slot.get(pg.get("owner"))
             if _owner is not None and _owner["team"] == actor["team"]:
                 if pg.get("self_amt"):
@@ -1281,6 +1385,10 @@ def resolve(match_id: int) -> dict | None:
         receiver = None
         if not catch:
             self_ab = abilities.peek_armed(state, actor["slot"])
+            if self_ab is not None and not _gated(
+                self_ab, _uctx(actor, defender)
+            ):
+                self_ab = None
             if (self_ab is not None and self_ab.save_self) or duel.get("save_self"):
                 if self_ab is not None and self_ab.save_self:
                     abilities.spend_armed(state, actor["slot"])
@@ -1289,6 +1397,10 @@ def resolve(match_id: int) -> dict | None:
                 for r in roster:
                     if r["team"] == defender_team(actor):
                         d_ab = abilities.peek_armed(state, r["slot"])
+                        if d_ab is not None and not _gated(
+                            d_ab, _uctx(r, actor)
+                        ):
+                            d_ab = None
                         if d_ab is not None and d_ab.punch_to_self:
                             abilities.spend_armed(state, r["slot"])
                             receiver = r
@@ -1331,7 +1443,11 @@ def resolve(match_id: int) -> dict | None:
 
     if auto is not None and auto["t"] == "stop":
         stopper = by_slot[auto["slot"]]
-        out["outcome"] = {"pass": "intercepted", "cross": "intercepted", "dribble": "tackled"}.get(action, "blocked")
+        if action == "penalty":
+            out["outcome"] = "saved"
+            out["erased"] = True
+        else:
+            out["outcome"] = {"pass": "intercepted", "cross": "intercepted", "dribble": "tackled"}.get(action, "blocked")
         out["stopped_by_skill"] = stopper
         db.bump_slot(match_id, stopper["slot"], stops=1)
         new_holder = turnover(stopper["slot"])
@@ -1339,6 +1455,10 @@ def resolve(match_id: int) -> dict | None:
         award_piece("deadlock")
     elif not cleared:
         lost_ab = abilities.peek_armed(state, actor["slot"])
+        if lost_ab is not None and not _gated(
+            lost_ab, _uctx(actor, defender)
+        ):
+            lost_ab = None
         if lost_ab is not None and lost_ab.on_lost == "foul":
             abilities.spend_armed(state, actor["slot"])
             abilities.note(state, actor["name"], lost_ab, "won the free kick")
@@ -1366,7 +1486,9 @@ def resolve(match_id: int) -> dict | None:
                 db.update_match(match_id, phase="play", pending=json.dumps(state))
                 return out
             stopper = defender
-            if action == "shoot":
+            if isinstance(auto, dict) and auto.get("t") == "stop" and auto.get("slot") is not None:
+                stopper = by_slot.get(auto["slot"]) or stopper
+            elif action == "shoot":
                 for slot in duel.get("wall") or []:
                     die = duel.get(f"die_{slot}")
                     if die is None:
@@ -1375,34 +1497,59 @@ def resolve(match_id: int) -> dict | None:
                     if past_defender(snapshot, slot) is not True:
                         stopper = by_slot[slot]
                         break
-            db.bump_slot(match_id, stopper["slot"], stops=1)
-            new_holder = turnover(stopper["slot"])
+            if stopper is None:
+                stopper = next((r for r in roster if r["team"] != actor["team"]), None)
+            if stopper is not None:
+                db.bump_slot(match_id, stopper["slot"], stops=1)
+                new_holder = turnover(stopper["slot"])
     elif action == "penalty":
         # No dice: the corner call decides it. A read corner is a guaranteed stop,
         # a missed corner is a guaranteed goal — abilities only push the keeper off
         # the shooter's corner, they never break the read.
         gk_spot = out["gk_spot"]
-        pen_ab = abilities.peek_armed(state, actor["slot"])
-        autoscore = False
-        if pen_ab is not None and (pen_ab.pen_edge or pen_ab.pen_autoscore):
-            abilities.spend_armed(state, actor["slot"])
-            autoscore = True
-            abilities.note(state, actor["name"], pen_ab, "keeper is sent the wrong way")
-        if autoscore and gk_spot == out["att_spot"]:
-            options = [t for t in PENALTY_TARGETS if t != out["att_spot"]]
-            gk_spot = random.choice(options)
-            out["gk_spot"] = gk_spot
-            out["autoscore"] = True
-        if out["att_spot"] != gk_spot:
-            score_goal()
-        else:
+        spot_row = by_slot.get(duel.get("spotter"))
+        erased = isinstance(auto, dict) and auto.get("t") == "stop"
+        if not erased and spot_row is not None:
+            k_ab = abilities.peek_armed(state, spot_row["slot"])
+            if k_ab is not None and k_ab.auto == "stop" and _gated(
+                k_ab, _uctx(spot_row, actor)
+            ):
+                abilities.spend_armed(state, spot_row["slot"])
+                abilities.note(state, spot_row["name"], k_ab, "penalty erased — no guess needed", icon="🧤")
+                erased = True
+        if erased:
             keeper_restart(catch=True)
-            out["nerve"] = "read"
+            out["erased"] = True
+        else:
+            pen_ab = abilities.peek_armed(state, actor["slot"])
+            if pen_ab is not None and not _gated(
+                pen_ab, _uctx(actor, defender)
+            ):
+                pen_ab = None
+            autoscore = False
+            if pen_ab is not None and (pen_ab.pen_edge or pen_ab.pen_autoscore):
+                abilities.spend_armed(state, actor["slot"])
+                autoscore = True
+                abilities.note(state, actor["name"], pen_ab, "keeper is sent the wrong way")
+            if autoscore and gk_spot == out["att_spot"]:
+                options = [t for t in PENALTY_TARGETS if t != out["att_spot"]]
+                gk_spot = random.choice(options)
+                out["gk_spot"] = gk_spot
+                out["autoscore"] = True
+            if out["att_spot"] != gk_spot:
+                score_goal()
+            else:
+                keeper_restart(catch=True)
+                out["nerve"] = "read"
     elif action in KEEPER_ACTIONS:
         for slot in wall_beaten:
             if slot not in beaten:
                 beaten.append(slot)
         shot_ab = abilities.peek_armed(state, actor["slot"])
+        if shot_ab is not None and not _gated(
+            shot_ab, _uctx(actor, defender)
+        ):
+            shot_ab = None
         down = duel.get("gk_down", 0)
         margin = duel.get("save_margin", 0)
         tie = bool(duel.get("tie_win"))
@@ -1466,6 +1613,10 @@ def resolve(match_id: int) -> dict | None:
                     # no room for the forced dribble — the pull happens on the spot
                     puppet_take(state["zone"], keep_outcome=True)
             buff_ab = abilities.peek_armed(state, actor["slot"])
+            if buff_ab is not None and not _gated(
+                buff_ab, _uctx(actor, defender)
+            ):
+                buff_ab = None
             if pbuff is not None:
                 # charge already burned in open_duel — pay the stashed buff
                 _pab = abilities.get(pbuff.get("src", ""))
@@ -1485,6 +1636,10 @@ def resolve(match_id: int) -> dict | None:
             state["last_pass"] = actor["slot"]
             new_holder = duel["target"]
             buff_ab = abilities.peek_armed(state, actor["slot"])
+            if buff_ab is not None and not _gated(
+                buff_ab, _uctx(actor, defender)
+            ):
+                buff_ab = None
             if pbuff is not None:
                 _pab = abilities.get(pbuff.get("src", ""))
                 if _pab is not None:
@@ -1567,228 +1722,4 @@ def resolve(match_id: int) -> dict | None:
     return out
 
 
-def duel_line(out: dict) -> str:
-    if out["defender"] is None and not out.get("wall_rolls"):
-        return ""
-    att_boosts = out.get("att_boosts") or []
-    def_boosts = out.get("def_boosts") or []
-    att_parts = [f"{out['att_die']}"] + [f"⚡{n}" for _, n in att_boosts]
-    att_sum = "+".join(att_parts) + f"+{out['att_power']}"
-    att_total = f"{out['att_total']}" if out["att_total"] is not None else "?"
-    if out.get("wall_rolls"):
-        return f"<code>{att_sum}={att_total}</code> vs 🧱 <i>wall</i>"
-    if out.get("def_die") is None:
-        if out.get("att_die") is None:
-            return ""
-        return f"<code>{att_sum}={att_total}</code>"
-    def_parts = [f"{out['def_die']}"] + [f"🛡{n}" for _, n in def_boosts]
-    def_sum = "+".join(def_parts) + f"+{out['def_power']}"
-    def_total = f"{out['def_total']}" if out["def_total"] is not None else "?"
-    return (
-        f"<code>{att_sum}={att_total}</code> vs "
-        f"<code>{def_sum}={def_total}</code>"
-    )
 
-
-def wall_line(out: dict, by_slot: dict) -> str:
-    rolls = out.get("wall_rolls") or []
-    if not rolls:
-        return ""
-    rows = []
-    for r in rolls:
-        row = by_slot.get(r["slot"])
-        if row is None:
-            continue
-        mark = "💨" if r["slot"] in (out.get("beaten") or []) else "🛡"
-        rows.append(
-            f"   {mark} <b>{row['name']}</b> <code>{r['die']}+{out['def_power']}</code>"
-        )
-    return "\n".join(rows)
-
-
-def gk_line(out: dict) -> str:
-    if out["gk_die"] is None:
-        return ""
-    eff = out.get("gk_total_eff")
-    shown = eff if eff is not None else out["gk_total"]
-    return (
-        f"<code>{out['att_die']}+{out['att_power']}={out['att_total']}</code> vs "
-        f"🧤<code>{out['gk_die']}+{out['gk_power']}={shown}</code>"
-    )
-
-
-
-# ------------------------------------------------------- Phase 7: commentary pools
-# Base lines per outcome — describe() picks one at random so matches never read
-# the same twice. Only the plain branches are swapped; skill/walk/gamble specials
-# and every follow-up line (assist, nerve, wall, gk) stay deterministic.
-COMMENTARY: dict[str, tuple[str, ...]] = {
-    "goal": (
-        f"⚽️ <b>GOAL — {{actor}}</b> beats {KEEPER_NAME}!",
-        f"⚽️ <b>GOAL!</b> <b>{{actor}}</b> buries it — {KEEPER_NAME} never moved!",
-        f"⚽️ <b>GOAL — {{actor}}</b> with ice in his veins! {KEEPER_NAME} beaten!",
-        f"⚽️ <b>GOAL!</b> <b>{{actor}}</b> unleashes — and the net bulges past {KEEPER_NAME}!",
-    ),
-    "pass_ok": (
-        "🎯 <b>{actor}</b> ➜ <b>{target}</b> — a sharp pass into the channel",
-        "🎯 <b>{actor}</b> ➜ <b>{target}</b> — threaded through the line",
-        "🎯 <b>{actor}</b> ➜ <b>{target}</b> — the delivery finds its mark",
-    ),
-    "dribble_ok": (
-        "🌀 <b>{actor}</b> dribbles past <b>{defender}</b> — he's out of the play.",
-        "🌀 <b>{defender}</b> buys the feint — <b>{actor}</b> is gone.",
-        "🌀 <b>{actor}</b> twists away from <b>{defender}</b> — nothing but his back.",
-    ),
-    "tackled": (
-        "🦵 <b>{defender}</b> takes the ball off <b>{actor}</b>.",
-        "🦵 <b>{defender}</b> times it perfectly — <b>{actor}</b> loses it.",
-        "🦵 clean challenge — <b>{defender}</b> rips it off <b>{actor}</b>.",
-    ),
-    "intercepted": (
-        "🚫 <b>{defender}</b> reads <b>{actor}</b>'s delivery.",
-        "🚫 <b>{defender}</b> cuts it out — <b>{actor}</b>'s ball never arrives.",
-        "🚫 <b>{defender}</b> sees it coming and steps in front of <b>{actor}</b>.",
-    ),
-    "saved": (
-        f"🧤 <b>{KEEPER_NAME}</b> denies <b>{{actor}}</b> —",
-        f"🧤 <b>{KEEPER_NAME}</b> shuts the door on <b>{{actor}}</b> —",
-        f"🧤 huge hands — <b>{KEEPER_NAME}</b> answers <b>{{actor}}</b> —",
-    ),
-    "blocked": (
-        "🧱 <b>{defender}</b> blocks <b>{actor}</b>'s effort.",
-        "🧱 <b>{defender}</b> throws himself in — <b>{actor}</b>'s path is closed.",
-        "🧱 brave defending — <b>{defender}</b> shuts <b>{actor}</b> down.",
-    ),
-    "wall": (
-        f"🧱 <b>{{actor}}</b>'s effort is swarmed — the wall holds.",
-        f"🧱 the wall stands tall — <b>{{actor}}</b>'s shot crashes off it.",
-        f"🧱 bodies everywhere — <b>{{actor}}</b> can't punch through.",
-    ),
-}
-
-
-def commentary(key: str, **kw) -> str:
-    """Pick one random base line from a COMMENTARY pool and render it."""
-    return random.choice(COMMENTARY[key]).format(**kw)
-
-
-def big_moment_lines(out: dict, goals: int) -> list[str]:
-    """Extra hype lines for a goal — hat-trick, gamble payoff.
-
-    Quiet goals return nothing: every added line must earn its place.
-    """
-    notes: list[str] = []
-    if goals >= 3:
-        notes.append("🎩 <b>HAT-TRICK!</b>")
-    if out.get("gamble_beaten"):
-        notes.append(f"🎲 <b>RISK PAID OFF</b> — {out['gamble_beaten']} beaten on the die.")
-    return notes
-
-
-def describe(out: dict, by_slot: dict | None = None) -> str:
-    actor = out["actor"]["name"]
-    outcome = out["outcome"]
-    duel = duel_line(out)
-    wall_txt = wall_line(out, by_slot or {})
-    defender = out["defender"]["name"] if out["defender"] else "—"
-    free = " <i>(unmarked — everyone's beaten)</i>" if out.get("unmarked") else ""
-
-    if outcome == "pass_ok":
-        if out.get("walked"):
-            line = f"🎯 <b>{actor}</b> ➜ <b>{out['target']['name']}</b> — a casual ball into open space. <i>No duel needed.</i>"
-        else:
-            line = commentary("pass_ok", actor=actor, target=out["target"]["name"]) + f".{free} {duel}"
-        if out.get("pass_advanced"):
-            line += "\n     ➡️ the cut-back carries the play a zone forward"
-        return line
-    if outcome == "cross_ok":
-        return (
-            f"📢 <b>{actor}</b> swings the free kick into <b>{out['target']['name']}</b> — "
-            f"delivery arrived.{free} {duel}"
-        )
-    if outcome == "intercepted":
-        line = commentary("intercepted", actor=actor, defender=defender) + f" {duel}"
-        if out.get("stopped_by_skill"):
-            line = f"🚫 <b>{out['stopped_by_skill']['name']}</b> snuffs out <b>{actor}</b>'s play before it begins."
-        if out.get("first_free"):
-            line += "\n     🔁 <b>…but the loss doesn't count.</b> <i>One more try.</i>"
-        return line
-    if outcome == "dribble_ok":
-        if out.get("stopped_by_skill"):
-            return f"🌀 <b>{actor}</b> leaves <b>{defender}</b> grasping at air — gone."
-        if out.get("gamble_beaten"):
-            return (
-                f"🎲 <b>{actor}</b> rolls the dice and ghosts past <b>{defender}</b> —"
-                f" <b>{out['gamble_beaten']}</b> defenders beaten without a fight.{free}"
-            )
-        if out["defender"] is None:
-            if out.get("walked"):
-                return f"🚶 <b>{actor}</b> advances unopposed — the road ahead is clear.{free}"
-            return f"🌀 <b>{actor}</b> drives forward — no one left to stop him.{free}"
-        return commentary("dribble_ok", actor=actor, defender=defender) + f" {duel}"
-    if outcome == "tackled":
-        if out.get("stopped_by_skill"):
-            return f"🦵 <b>{out['stopped_by_skill']['name']}</b> wins the ball off <b>{actor}</b> outright."
-        return commentary("tackled", actor=actor, defender=defender) + f" {duel}"
-    if outcome == "blocked":
-        if out.get("gamble_backfire"):
-            return f"💀 <b>{actor}</b>'s gamble collapses — <b>{defender}</b> was ready for it all along."
-        if out.get("stopped_by_skill"):
-            return f"🧱 <b>{out['stopped_by_skill']['name']}</b> throws himself in front of <b>{actor}</b>'s effort."
-        line = commentary("blocked", actor=actor, defender=defender) + f" {duel}"
-        if out["action"] == "shoot":
-            line = commentary("wall", actor=actor) + f" {duel}"
-            if wall_txt:
-                line = commentary("wall", actor=actor)
-                line += "\n" + wall_txt
-        if out.get("first_free"):
-            line += "\n     🔁 <b>…but the loss doesn't count.</b> <i>One more try.</i>"
-        return line
-    if outcome == "goal":
-        line = commentary("goal", actor=actor)
-        if out["action"] == "penalty":
-            line += f"\n     🎯 <b>{out['att_spot']}</b> in — keeper dived {out['gk_spot']}"
-            if out.get("nerve"):
-                line += f"\n     ⚡️ nerve duel <code>{out['pen_sho']}</code> vs <code>{out['pen_gk']}</code>"
-            return line
-        if out["action"] == "shoot" and wall_txt:
-            line += "\n     🧱 every defender beaten:"
-            line += "\n" + wall_txt
-        elif duel:
-            line += f"\n     🛡 {duel}"
-        elif out["action"] == "freekick":
-            line += "\n     🎯 straight off the dead ball"
-        else:
-            line += "\n     🛡 no marker left — free shot"
-        line += f"\n     🧤 {gk_line(out)}"
-        if out.get("assister"):
-            line += f"\n     🅰 Assist — <b>{out['assister']['name']}</b>"
-        return line
-    if outcome == "saved":
-        catch = out.get("keeper_dist") == "catch"
-        head = "holds it 🧤" if catch else "punches it away 💥"
-        line = commentary("saved", actor=actor) + f" {head}"
-        if out["action"] == "penalty":
-            line += f"\n     🎯 shot {out['att_spot']} — keeper read it"
-            line += f"\n     ⚡️ nerve duel <code>{out.get('pen_sho')}</code> vs <code>{out.get('pen_gk')}</code>"
-            return line
-        if out["action"] == "shoot" and wall_txt:
-            line += "\n     🧱 the whole wall was brushed aside:"
-            line += "\n" + wall_txt
-        elif duel:
-            line += f"\n     🛡 {duel}"
-        line += f"\n     🧤 {gk_line(out)}"
-        if not catch:
-            line += f"\n     ➜ loose ball falls to <b>{out['receiver']['name']}</b>"
-        return line
-    if outcome == "foul":
-        piece = "PENALTY 🥶" if out["set_piece"] == "penalty" else "FREE KICK 🎯"
-        reason = out.get("reason")
-        if reason == "drawn":
-            return f"🎭 <b>{actor}</b> wins the referee's whistle — <b>{piece}</b>! {duel}"
-        if wall_txt:
-            base = f"⚖️ Deadlock — <b>{piece}</b> for <b>{actor}</b>. {duel}"
-            base += "\n" + wall_txt
-            return base
-        return f"⚖️ Deadlock — <b>{piece}</b> for <b>{actor}</b>. {duel}"
-    return duel

@@ -89,7 +89,6 @@ KEEPER_NAME = "BlueLock Man"
 KEEPER_POWER = 4
 KEEPER_CATCH_ROLL = 4
 PENALTY_TARGETS = ("left", "center", "right")
-PENALTY_NERVE_SPAN = 2
 
 ZONE_NAME = ("Midfield", "Final Third", "Box")
 ZONE_BOX = len(ZONE_NAME) - 1
@@ -150,7 +149,7 @@ XP_PER_LEVEL = 520  # leveled up: 2× harder than before
 LEVEL_UP_BONUS = 250_000
 
 # ── bound system: starts at tier 1, upgrades buy a stronger version ────────
-BOUND_ENABLED = False  # TEST SEASON: Bound stays off; flip to True for release
+BOUND_ENABLED = True
 
 # Taha: ALL passives are manual — they never arm themselves; the player taps the
 # passive button to arm, and the charge burns when the effect actually fires.
@@ -172,7 +171,6 @@ RECAP_KEEP = 5
 LOBBY_TTL_HOURS = 6
 LOBBY_SWEEP_SECONDS = 1800
 TURN_SWEEP_SECONDS = 30
-AUTO_ROLL_SECONDS = 180
 MATCHLOG_KEEP = 100
 
 DAILY_BASE = 50_000
